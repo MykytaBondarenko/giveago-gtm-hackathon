@@ -403,7 +403,7 @@ function ResultsPanel({ session }: { session: Session }) {
           </div>
           {score ? (
             <>
-              <div className="text-3xl font-bold text-white/90">{score.score}</div>
+              <div className="text-4xl font-bold text-white/90 tabular-nums">{score.score}</div>
               <ul className="mt-3 space-y-1 text-sm text-white/60 list-disc list-inside">
                 {score.reasons.map((reason) => (
                   <li key={reason}>{reason}</li>

@@ -2,6 +2,8 @@ import { randomUUID } from "crypto";
 import { getSession, emitStep, patchSession } from "./store";
 import { research } from "./research";
 import { identify } from "./identify";
+import { scoreIcp } from "./score";
+import { choosePersona } from "./people";
 import type {
   Company,
   IcpScore,
@@ -16,11 +18,12 @@ import type {
   VisitEvent,
 } from "./types";
 
-// ORCHESTRATOR. identify() and research() are real (see lib/identify.ts,
-// lib/research.ts); score/persona/compose/engage/unify still return fixture
-// data after a short delay pending later tasks. withStep is the safety net
-// that makes each swap safe: a real call that errors or hangs degrades to
-// fixture data instead of taking the demo down.
+// ORCHESTRATOR. identify(), research(), scoreIcp(), and choosePersona() are
+// real (see lib/identify.ts, lib/research.ts, lib/score.ts, lib/people.ts);
+// compose/engage/unify still return fixture data after a short delay
+// pending later tasks. withStep is the safety net that makes each swap
+// safe: a real call that errors or hangs degrades to fixture data instead
+// of taking the demo down.
 
 const STEP_DURATION_MS: Record<StepName, [number, number]> = {
   identify: [400, 700],
@@ -189,63 +192,31 @@ async function researchStep(company: Company | undefined): Promise<Research> {
   return research(company);
 }
 
-async function scoreStep(company: Company | undefined): Promise<IcpScore> {
-  await wait(jitter(STEP_DURATION_MS.score));
-
+async function scoreStep(company: Company | undefined, research: Research): Promise<IcpScore> {
   if (!company) {
-    return { score: 20, reasons: ["No company identified yet"], verdict: "cold" };
+    await wait(jitter(STEP_DURATION_MS.score));
+    return { score: 0, reasons: ["No company identified yet, so there's nothing to score."], verdict: "cold" };
   }
-
-  const score = company.employeeCount && company.employeeCount > 1000 ? 64 : 82;
-  return {
-    score,
-    reasons: [
-      "Employee count in target band",
-      `${company.industry ?? "Industry"} matches ICP vertical`,
-      "Recent funding/hiring signals budget availability",
-    ],
-    verdict: score >= 75 ? "hot" : score >= 50 ? "warm" : "cold",
-  };
+  return scoreIcp(company, research);
 }
 
-const PERSONA_BY_INDUSTRY: Record<string, Persona> = {
-  "Payments Infrastructure": {
-    title: "VP of Engineering",
-    department: "Engineering",
-    whyThisPerson: "Owns reliability of the payments stack and is the economic buyer for observability tooling.",
-  },
-  "Financial Data Infrastructure": {
-    title: "Head of Platform Engineering",
-    department: "Platform Engineering",
-    whyThisPerson: "Responsible for uptime of the API platform partners depend on.",
-  },
-  "Corporate Fintech": {
-    title: "VP of Infrastructure",
-    department: "Engineering",
-    whyThisPerson: "Owns reliability of the banking and card infrastructure underneath the product.",
-  },
-  "Spend Management Fintech": {
-    title: "Director of Payments Engineering",
-    department: "Engineering",
-    whyThisPerson: "Leads the team responsible for transaction reliability and reconciliation.",
-  },
-  "Card Issuing Infrastructure": {
-    title: "Director of Platform Reliability",
-    department: "Platform Engineering",
-    whyThisPerson: "Accountable for uptime SLAs on the card issuing platform.",
-  },
-};
-
 const DEFAULT_PERSONA: Persona = {
-  title: "VP of Engineering",
+  title: "VP Engineering",
   department: "Engineering",
   whyThisPerson: "Owns infrastructure reliability and is the economic buyer for observability tooling.",
 };
 
-async function personaStep(company: Company | undefined): Promise<Persona> {
-  await wait(jitter(STEP_DURATION_MS.persona));
-  if (!company?.industry) return DEFAULT_PERSONA;
-  return PERSONA_BY_INDUSTRY[company.industry] ?? DEFAULT_PERSONA;
+async function personaStep(
+  company: Company | undefined,
+  research: Research,
+  score: IcpScore,
+  path: string,
+): Promise<Persona> {
+  if (!company) {
+    await wait(jitter(STEP_DURATION_MS.persona));
+    return DEFAULT_PERSONA;
+  }
+  return choosePersona(company, research, score, path);
 }
 
 async function composeStep(company: Company | undefined, persona: Persona): Promise<Outreach> {
@@ -318,7 +289,7 @@ async function runPipelineSteps(visitId: string): Promise<void> {
   );
   const company = identifyOutcome.identify.company;
 
-  await withStep<Research>(
+  const researchResult = await withStep<Research>(
     "research",
     visitId,
     () => researchStep(company),
@@ -326,10 +297,10 @@ async function runPipelineSteps(visitId: string): Promise<void> {
     (value) => ({ research: value }),
   );
 
-  await withStep<IcpScore>(
+  const score = await withStep<IcpScore>(
     "score",
     visitId,
-    () => scoreStep(company),
+    () => scoreStep(company, researchResult),
     { score: 0, reasons: ["Score step failed"], verdict: "cold" },
     (value) => ({ score: value }),
   );
@@ -337,7 +308,7 @@ async function runPipelineSteps(visitId: string): Promise<void> {
   const persona = await withStep<Persona>(
     "persona",
     visitId,
-    () => personaStep(company),
+    () => personaStep(company, researchResult, score, visit.path),
     DEFAULT_PERSONA,
     (value) => ({ persona: value }),
   );
