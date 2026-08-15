@@ -1,1 +1,1 @@
-Give(a)Go GTM Hackathon Project
+Give(a)Go GTM Hackathon
