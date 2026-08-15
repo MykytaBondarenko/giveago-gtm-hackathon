@@ -338,22 +338,30 @@ async function runPipelineSteps(visitId: string): Promise<void> {
     (value) => ({ outreach: value.outreach }),
   );
 
-  await withStep<{ engagement: LiveEngagement; engagedAtMs: number }>(
-    "engage",
-    visitId,
-    () => engageStep(composeResult.engagement, visit),
-    {
-      engagement: {
-        headline: "Still exploring options?",
-        line: "Most teams start with a short fit check.",
-        cta: "Grab a time",
-        dismissible: true,
-        shownAt: Date.now(),
+  // Restraint is a feature: below ICP threshold, no banner. The step is
+  // explicitly "skipped" (not run and defaulted) so the dashboard can say so.
+  if (score.verdict === "cold") {
+    const note = "Below ICP threshold (cold) — no banner shown.";
+    console.log(`[t60] visit=${visitId} step=engage status=skipped ms=0 note="${note}"`);
+    emitStep({ visitId, step: "engage", status: "skipped", ms: 0, note });
+  } else {
+    await withStep<{ engagement: LiveEngagement; engagedAtMs: number }>(
+      "engage",
+      visitId,
+      () => engageStep(composeResult.engagement, visit),
+      {
+        engagement: {
+          headline: "Still exploring options?",
+          line: "Most teams start with a short fit check.",
+          cta: "Grab a time",
+          dismissible: true,
+          shownAt: Date.now(),
+        },
+        engagedAtMs: Date.now() - visit.ts,
       },
-      engagedAtMs: Date.now() - visit.ts,
-    },
-    (value) => ({ engagement: value.engagement, engagedAtMs: value.engagedAtMs }),
-  );
+      (value) => ({ engagement: value.engagement, engagedAtMs: value.engagedAtMs }),
+    );
+  }
 
   await withStep<{ unifyRef: string; totalMs: number }>(
     "unify",

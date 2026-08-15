@@ -106,4 +106,5 @@ export interface Session {
   steps: StepEvent[];
   totalMs?: number;
   engagedAtMs?: number;
+  engagementDismissedAt?: number;
 }

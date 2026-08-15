@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import companiesFixture from "@/fixtures/companies.json";
+import type { LiveEngagement } from "@/lib/types";
 
 declare global {
   interface Window {
@@ -69,7 +70,7 @@ async function postTrack(body: Record<string, unknown>): Promise<{ visitId: stri
 }
 
 export default function DemoPage() {
-  const visitIdRef = useRef<string | null>(null);
+  const [visitId, setVisitId] = useState<string | null>(null);
   const mountedAtRef = useRef<number>(Date.now());
 
   useEffect(() => {
@@ -80,7 +81,7 @@ export default function DemoPage() {
       const result = await postTrack({ path: "/demo", userAgent: navigator.userAgent });
       if (cancelled || !result) return;
       currentVisitId = result.visitId;
-      visitIdRef.current = result.visitId;
+      setVisitId(result.visitId);
       initUnifyIntentClient(result.visitId);
     })();
 
@@ -116,15 +117,85 @@ export default function DemoPage() {
       <Pricing />
       <CtaBand />
       <Footer onSimulate={simulateVisit} />
-      <LiveBanner />
+      <LiveBanner visitId={visitId} />
     </main>
   );
 }
 
-// Placeholder mount point for the on-site engagement surface. Renders
-// nothing for now — a later task fills it in with the live banner content.
-function LiveBanner() {
-  return null;
+// The synchronous engagement surface: the one thing the sponsor stack can't
+// do. Opens a per-visitor SSE connection and slides in the moment the
+// pipeline's engage step fires — that instant is the whole pitch.
+function LiveBanner({ visitId }: { visitId: string | null }) {
+  const [engagement, setEngagement] = useState<LiveEngagement | null>(null);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    if (!visitId) return;
+
+    const es = new EventSource(`/api/engage-stream?visitId=${encodeURIComponent(visitId)}`);
+    es.addEventListener("engagement", (event) => {
+      const data = JSON.parse((event as MessageEvent).data) as LiveEngagement;
+      setEngagement(data);
+      // Let the off-screen position paint first, then animate on — collapsing
+      // both states into one frame would skip the slide-in entirely.
+      requestAnimationFrame(() => requestAnimationFrame(() => setVisible(true)));
+    });
+
+    return () => es.close();
+  }, [visitId]);
+
+  const dismiss = useCallback(() => {
+    setVisible(false);
+    if (visitId) {
+      void fetch("/api/engage-dismiss", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ visitId }),
+      });
+    }
+  }, [visitId]);
+
+  const handleCta = useCallback(() => {
+    dismiss();
+    document.getElementById("cta")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [dismiss]);
+
+  if (!engagement) return null;
+
+  return (
+    <div
+      aria-live="polite"
+      className={`fixed inset-x-0 bottom-0 z-50 flex justify-center px-4 pb-4 transition-transform duration-[250ms] ease-out ${
+        visible ? "translate-y-0" : "translate-y-full"
+      }`}
+    >
+      <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-slate-900/95 p-4 shadow-2xl shadow-black/50 backdrop-blur">
+        <div className="flex items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-white">{engagement.headline}</p>
+            <p className="mt-1 text-sm text-slate-400">{engagement.line}</p>
+          </div>
+          <button
+            type="button"
+            onClick={dismiss}
+            aria-label="Dismiss"
+            className="shrink-0 rounded-full p-1 text-slate-500 transition-colors hover:bg-white/5 hover:text-slate-300"
+          >
+            <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+              <path d="M4.293 4.293a1 1 0 0 1 1.414 0L10 8.586l4.293-4.293a1 1 0 1 1 1.414 1.414L11.414 10l4.293 4.293a1 1 0 0 1-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 0 1-1.414-1.414L8.586 10 4.293 5.707a1 1 0 0 1 0-1.414Z" />
+            </svg>
+          </button>
+        </div>
+        <button
+          type="button"
+          onClick={handleCta}
+          className="mt-3 w-full rounded-lg bg-blue-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-400"
+        >
+          {engagement.cta}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function Nav() {

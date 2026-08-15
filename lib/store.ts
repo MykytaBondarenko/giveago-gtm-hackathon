@@ -80,3 +80,10 @@ export function peekUnifyReveal(ip: string, maxAgeMs: number): Company | undefin
   if (Date.now() - entry.receivedAt > maxAgeMs) return undefined;
   return entry.company;
 }
+
+// Frequency cap: once dismissed, a session's banner is never sent again.
+// Persisted on the session itself so /api/engage-stream can check it on
+// every connect, including a reconnect after the tab was reloaded.
+export function markEngagementDismissed(visitId: string): void {
+  patchSession(visitId, { engagementDismissedAt: Date.now() });
+}

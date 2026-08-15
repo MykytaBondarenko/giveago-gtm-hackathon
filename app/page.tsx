@@ -360,7 +360,8 @@ function stepColor(status: StepStatus): string {
 }
 
 function ResultsPanel({ session }: { session: Session }) {
-  const { company, identify, research, score, persona, outreach } = session;
+  const { company, identify, research, score, persona, outreach, engagement, engagedAtMs } = session;
+  const engageInfo = getStepInfo(session, "engage");
 
   return (
     <div className="grid grid-cols-1 xl:grid-cols-[1fr_1fr_260px] gap-6 items-start">
@@ -526,10 +527,44 @@ function ResultsPanel({ session }: { session: Session }) {
         )}
       </div>
 
-      <div className="rounded-[2.5rem] border-4 border-white/15 bg-white/[0.02] p-3 h-[420px] flex flex-col">
-        <div className="mx-auto w-16 h-1 rounded-full bg-white/15 mb-3" />
-        <div className="flex-1 rounded-[1.75rem] border border-white/10 flex items-center justify-center">
-          <span className="text-white/20 text-xs text-center px-6">Live banner mirror — reserved</span>
+      <div className="flex flex-col items-center gap-4">
+        {engagedAtMs !== undefined && (
+          <div className="text-center">
+            <div className="font-mono font-bold text-emerald-400 tabular-nums leading-none" style={{ fontSize: "clamp(1.75rem, 3vw, 2.5rem)" }}>
+              {engagedAtMs}
+              <span className="text-lg text-emerald-400/60">ms</span>
+            </div>
+            <div className="text-[11px] uppercase tracking-widest text-white/40 mt-1">visit → banner</div>
+          </div>
+        )}
+
+        <div className="rounded-[2.5rem] border-4 border-white/15 bg-white/[0.02] p-3 h-[420px] w-full flex flex-col">
+          <div className="mx-auto w-16 h-1 rounded-full bg-white/15 mb-3 shrink-0" />
+          <div className="relative flex-1 rounded-[1.75rem] border border-white/10 overflow-hidden">
+            {!engagement && (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="text-white/20 text-xs text-center px-6">
+                  {engageInfo.status === "skipped"
+                    ? "No engagement — below ICP threshold."
+                    : "Waiting for engagement…"}
+                </span>
+              </div>
+            )}
+            {engagement && (
+              <div className="absolute inset-x-2 bottom-2 rounded-xl border border-white/10 bg-slate-900/95 p-3 shadow-lg shadow-black/40">
+                <div className="flex items-start gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-semibold text-white">{engagement.headline}</p>
+                    <p className="mt-0.5 text-[11px] text-white/50">{engagement.line}</p>
+                  </div>
+                  <span className="shrink-0 text-white/30 text-xs leading-none">&times;</span>
+                </div>
+                <div className="mt-2 w-full rounded-md bg-blue-500 px-2 py-1.5 text-center text-[11px] font-semibold text-white">
+                  {engagement.cta}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
