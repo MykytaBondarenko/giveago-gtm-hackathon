@@ -1,5 +1,4 @@
 import { listSessions, subscribe } from "@/lib/store";
-import { startDemoLoop } from "@/lib/pipeline";
 import type { StepEvent } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -10,10 +9,6 @@ function sseMessage(event: string, data: unknown): string {
 }
 
 export async function GET(request: Request) {
-  // Demo-only: self-generates mock visits so the dashboard has something to
-  // stream even without a real /api/track integration wired up yet.
-  startDemoLoop();
-
   const encoder = new TextEncoder();
 
   let unsubscribe: () => void = () => {};

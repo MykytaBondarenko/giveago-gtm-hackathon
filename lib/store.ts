@@ -1,7 +1,16 @@
 import type { Session, StepEvent, VisitEvent } from "./types";
 
-const sessions = new Map<string, Session>();
-const subscribers = new Set<(event: StepEvent) => void>();
+// Backed by globalThis, not a plain module-level variable: `next dev`
+// recompiles routes on demand and can evict an inactive one, which would
+// otherwise hand this module a fresh Map and silently drop every session.
+// globalThis is the one thing that survives that recompilation.
+declare global {
+  var __t60Sessions: Map<string, Session> | undefined;
+  var __t60Subscribers: Set<(event: StepEvent) => void> | undefined;
+}
+
+const sessions = (globalThis.__t60Sessions ??= new Map<string, Session>());
+const subscribers = (globalThis.__t60Subscribers ??= new Set<(event: StepEvent) => void>());
 
 export function createSession(visit: VisitEvent): Session {
   const session: Session = { visit, steps: [] };

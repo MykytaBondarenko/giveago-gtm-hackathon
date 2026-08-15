@@ -1,0 +1,98 @@
+[
+  {
+    "domain": "stripe.com",
+    "name": "Stripe",
+    "employeeCount": 8000,
+    "industry": "Payments Infrastructure",
+    "hqCountry": "US",
+    "description": "Global payments and financial infrastructure platform processing trillions of dollars a year for internet businesses.",
+    "research": {
+      "signals": [
+        { "text": "Expanded Stripe Treasury into new markets", "origin": "unify", "date": "2026-05-14", "source": "Stripe Newsroom" },
+        { "text": "Posted 40+ open roles across Payments Infrastructure", "origin": "agent", "date": "2026-06-02", "source": "Careers page" },
+        { "text": "Engineering blog post on scaling ledger reconciliation", "origin": "agent", "date": "2026-04-22", "source": "stripe.com/blog" }
+      ],
+      "techHints": ["Kubernetes", "Kafka"]
+    }
+  },
+  {
+    "domain": "plaid.com",
+    "name": "Plaid",
+    "employeeCount": 1400,
+    "industry": "Financial Data Infrastructure",
+    "hqCountry": "US",
+    "description": "API platform connecting bank accounts to fintech apps, powering account verification and payments for thousands of developers.",
+    "research": {
+      "signals": [
+        { "text": "Announced a new real-time payments API", "origin": "unify", "date": "2026-03-10", "source": "Plaid Blog" },
+        { "text": "Hiring a Staff SRE focused on payments reliability", "origin": "agent", "date": "2026-05-28", "source": "Careers page" },
+        { "text": "Named to the Forbes Fintech 50", "origin": "agent", "date": "2026-02-18", "source": "Forbes" }
+      ],
+      "techHints": ["AWS", "gRPC"]
+    }
+  },
+  {
+    "domain": "brex.com",
+    "name": "Brex",
+    "employeeCount": 1200,
+    "industry": "Corporate Fintech",
+    "hqCountry": "US",
+    "description": "Corporate credit cards and spend management platform for high-growth companies, with an in-house banking-as-a-service layer.",
+    "research": {
+      "signals": [
+        { "text": "Closed a new growth funding round", "origin": "unify", "date": "2026-01-20", "source": "Crunchbase" },
+        { "text": "Posted a 'Head of Payments Reliability' role", "origin": "agent", "date": "2026-06-10", "source": "Careers page" },
+        { "text": "Migrated core ledger to a new microservices architecture", "origin": "agent", "date": "2026-04-05", "source": "Engineering blog" }
+      ],
+      "techHints": ["Temporal", "PostgreSQL"]
+    }
+  },
+  {
+    "domain": "adyen.com",
+    "name": "Adyen",
+    "employeeCount": 4500,
+    "industry": "Payments Infrastructure",
+    "hqCountry": "NL",
+    "description": "Single global payments platform used by enterprise merchants to accept payments across channels and currencies.",
+    "research": {
+      "signals": [
+        { "text": "Reported record transaction volume in the Q1 shareholder letter", "origin": "unify", "date": "2026-04-30", "source": "Investor Relations" },
+        { "text": "Opened a new engineering hub", "origin": "agent", "date": "2026-02-11", "source": "Adyen Newsroom" },
+        { "text": "Hiring for a new Platform Observability team", "origin": "agent", "date": "2026-05-19", "source": "Careers page" }
+      ],
+      "techHints": ["Prometheus", "Cassandra"]
+    }
+  },
+  {
+    "domain": "ramp.com",
+    "name": "Ramp",
+    "employeeCount": 1000,
+    "industry": "Spend Management Fintech",
+    "hqCountry": "US",
+    "description": "Corporate card and finance automation platform helping businesses control spend, close the books faster, and save time.",
+    "research": {
+      "signals": [
+        { "text": "Crossed a new ARR milestone reported in the press", "origin": "unify", "date": "2026-03-25", "source": "TechCrunch" },
+        { "text": "Posted a Senior Payments Infrastructure Engineer role", "origin": "agent", "date": "2026-06-01", "source": "Careers page" },
+        { "text": "Launched the Ramp Treasury product", "origin": "agent", "date": "2026-01-15", "source": "Ramp Blog" }
+      ],
+      "techHints": ["Go", "gRPC"]
+    }
+  },
+  {
+    "domain": "marqeta.com",
+    "name": "Marqeta",
+    "employeeCount": 900,
+    "industry": "Card Issuing Infrastructure",
+    "hqCountry": "US",
+    "description": "Modern card issuing platform providing APIs for virtual and physical card programs used by fintechs and enterprises.",
+    "research": {
+      "signals": [
+        { "text": "Signed a new enterprise card issuing partnership", "origin": "unify", "date": "2026-05-02", "source": "Marqeta Newsroom" },
+        { "text": "Posted a 'Director of Platform Reliability' role", "origin": "agent", "date": "2026-06-08", "source": "Careers page" },
+        { "text": "Published uptime SLA improvements in the Q1 letter", "origin": "agent", "date": "2026-04-28", "source": "Investor Relations" }
+      ],
+      "techHints": ["Kubernetes", "Kafka"]
+    }
+  }
+]
