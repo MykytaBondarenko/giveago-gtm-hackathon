@@ -8,9 +8,9 @@
     "description": "Global payments and financial infrastructure platform processing trillions of dollars a year for internet businesses.",
     "research": {
       "signals": [
-        { "text": "Expanded Stripe Treasury into new markets", "origin": "unify", "date": "2026-05-14", "source": "Stripe Newsroom" },
-        { "text": "Posted 40+ open roles across Payments Infrastructure", "origin": "agent", "date": "2026-06-02", "source": "Careers page" },
-        { "text": "Engineering blog post on scaling ledger reconciliation", "origin": "agent", "date": "2026-04-22", "source": "stripe.com/blog" }
+        { "text": "Posted 40+ open roles across Payments Infrastructure engineering", "origin": "agent", "category": "hiring", "date": "2026-06-02", "sourceUrl": "https://stripe.com/jobs" },
+        { "text": "Expanded Stripe Treasury into new European markets", "origin": "unify", "category": "expansion", "date": "2026-05-14", "sourceUrl": "https://stripe.com/newsroom" },
+        { "text": "Engineering blog post on scaling ledger reconciliation for five-nines uptime", "origin": "agent", "category": "tech", "date": "2026-04-22", "sourceUrl": "https://stripe.com/blog/engineering" }
       ],
       "techHints": ["Kubernetes", "Kafka"]
     }
@@ -24,9 +24,9 @@
     "description": "API platform connecting bank accounts to fintech apps, powering account verification and payments for thousands of developers.",
     "research": {
       "signals": [
-        { "text": "Announced a new real-time payments API", "origin": "unify", "date": "2026-03-10", "source": "Plaid Blog" },
-        { "text": "Hiring a Staff SRE focused on payments reliability", "origin": "agent", "date": "2026-05-28", "source": "Careers page" },
-        { "text": "Named to the Forbes Fintech 50", "origin": "agent", "date": "2026-02-18", "source": "Forbes" }
+        { "text": "Hiring a Staff SRE focused on payments reliability", "origin": "agent", "category": "hiring", "date": "2026-05-28", "sourceUrl": "https://plaid.com/careers" },
+        { "text": "Announced a new real-time payments API for developers", "origin": "unify", "category": "product", "date": "2026-03-10", "sourceUrl": "https://plaid.com/blog" },
+        { "text": "Raised a new funding round led by existing investors", "origin": "agent", "category": "funding", "date": "2026-02-18", "sourceUrl": "https://plaid.com/newsroom" }
       ],
       "techHints": ["AWS", "gRPC"]
     }
@@ -40,9 +40,9 @@
     "description": "Corporate credit cards and spend management platform for high-growth companies, with an in-house banking-as-a-service layer.",
     "research": {
       "signals": [
-        { "text": "Closed a new growth funding round", "origin": "unify", "date": "2026-01-20", "source": "Crunchbase" },
-        { "text": "Posted a 'Head of Payments Reliability' role", "origin": "agent", "date": "2026-06-10", "source": "Careers page" },
-        { "text": "Migrated core ledger to a new microservices architecture", "origin": "agent", "date": "2026-04-05", "source": "Engineering blog" }
+        { "text": "Posted a 'Head of Payments Reliability' role", "origin": "agent", "category": "hiring", "date": "2026-06-10", "sourceUrl": "https://www.brex.com/careers" },
+        { "text": "Closed a new growth funding round", "origin": "unify", "category": "funding", "date": "2026-01-20", "sourceUrl": "https://www.brex.com/newsroom" },
+        { "text": "Migrated core ledger to a new microservices architecture", "origin": "agent", "category": "tech", "date": "2026-04-05", "sourceUrl": "https://www.brex.com/blog" }
       ],
       "techHints": ["Temporal", "PostgreSQL"]
     }
@@ -56,27 +56,27 @@
     "description": "Single global payments platform used by enterprise merchants to accept payments across channels and currencies.",
     "research": {
       "signals": [
-        { "text": "Reported record transaction volume in the Q1 shareholder letter", "origin": "unify", "date": "2026-04-30", "source": "Investor Relations" },
-        { "text": "Opened a new engineering hub", "origin": "agent", "date": "2026-02-11", "source": "Adyen Newsroom" },
-        { "text": "Hiring for a new Platform Observability team", "origin": "agent", "date": "2026-05-19", "source": "Careers page" }
+        { "text": "Hiring for a new Platform Observability team", "origin": "agent", "category": "hiring", "date": "2026-05-19", "sourceUrl": "https://careers.adyen.com" },
+        { "text": "Opened a new engineering hub in Bengaluru", "origin": "unify", "category": "expansion", "date": "2026-02-11", "sourceUrl": "https://www.adyen.com/newsroom" },
+        { "text": "Launched a new unified commerce API for omnichannel merchants", "origin": "agent", "category": "product", "date": "2026-04-30", "sourceUrl": "https://www.adyen.com/blog" }
       ],
       "techHints": ["Prometheus", "Cassandra"]
     }
   },
   {
-    "domain": "ramp.com",
-    "name": "Ramp",
-    "employeeCount": 1000,
-    "industry": "Spend Management Fintech",
+    "domain": "nike.com",
+    "name": "Nike",
+    "employeeCount": 79400,
+    "industry": "Apparel & Footwear Retail",
     "hqCountry": "US",
-    "description": "Corporate card and finance automation platform helping businesses control spend, close the books faster, and save time.",
+    "description": "Global athletic footwear, apparel, and equipment company selling direct-to-consumer and through wholesale retail partners.",
     "research": {
       "signals": [
-        { "text": "Crossed a new ARR milestone reported in the press", "origin": "unify", "date": "2026-03-25", "source": "TechCrunch" },
-        { "text": "Posted a Senior Payments Infrastructure Engineer role", "origin": "agent", "date": "2026-06-01", "source": "Careers page" },
-        { "text": "Launched the Ramp Treasury product", "origin": "agent", "date": "2026-01-15", "source": "Ramp Blog" }
+        { "text": "Opened new flagship retail stores across three major cities", "origin": "agent", "category": "expansion", "date": "2026-05-20", "sourceUrl": "https://about.nike.com/en/newsroom" },
+        { "text": "Launched a new signature basketball shoe line for the holiday season", "origin": "unify", "category": "product", "date": "2026-03-15", "sourceUrl": "https://www.nike.com/launch" },
+        { "text": "Posted seasonal retail associate openings ahead of the holiday season", "origin": "agent", "category": "hiring", "date": "2026-06-05", "sourceUrl": "https://jobs.nike.com" }
       ],
-      "techHints": ["Go", "gRPC"]
+      "techHints": ["Shopify Plus", "Salesforce Commerce Cloud"]
     }
   },
   {
@@ -88,9 +88,9 @@
     "description": "Modern card issuing platform providing APIs for virtual and physical card programs used by fintechs and enterprises.",
     "research": {
       "signals": [
-        { "text": "Signed a new enterprise card issuing partnership", "origin": "unify", "date": "2026-05-02", "source": "Marqeta Newsroom" },
-        { "text": "Posted a 'Director of Platform Reliability' role", "origin": "agent", "date": "2026-06-08", "source": "Careers page" },
-        { "text": "Published uptime SLA improvements in the Q1 letter", "origin": "agent", "date": "2026-04-28", "source": "Investor Relations" }
+        { "text": "Posted a 'Director of Platform Reliability' role", "origin": "agent", "category": "hiring", "date": "2026-06-08", "sourceUrl": "https://www.marqeta.com/careers" },
+        { "text": "Signed a new enterprise card issuing partnership", "origin": "unify", "category": "expansion", "date": "2026-05-02", "sourceUrl": "https://www.marqeta.com/newsroom" },
+        { "text": "Published uptime SLA improvements in the Q1 investor letter", "origin": "agent", "category": "tech", "date": "2026-04-28", "sourceUrl": "https://www.marqeta.com/investors" }
       ],
       "techHints": ["Kubernetes", "Kafka"]
     }

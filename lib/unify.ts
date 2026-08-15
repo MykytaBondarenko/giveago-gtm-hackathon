@@ -116,10 +116,11 @@ async function runOperation(
 }
 
 function buildUpsertPayload(session: Session, company: Company): Record<string, unknown> {
+  const topSignalIndex = session.score?.topSignal ?? 0;
   const attrs = {
     icp_score: session.score?.score ?? null,
     verdict: session.score?.verdict ?? null,
-    top_signal: session.research?.signals[0]?.text ?? null,
+    top_signal: session.research?.signals[topSignalIndex]?.text ?? null,
     identify_source: session.identify?.source ?? null,
     engaged_at_ms: session.engagedAtMs ?? null,
     detected_at: new Date(session.visit.ts).toISOString(),

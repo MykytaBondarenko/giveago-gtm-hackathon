@@ -1,8 +1,8 @@
 import { getSession, emitStep, patchSession } from "./store";
 import { research } from "./research";
 import { identify } from "./identify";
-import { scoreIcp } from "./score";
-import { choosePersona } from "./people";
+import { scoreIcpRules, scoreAndAdvise, type PersonaSuggestion } from "./score";
+import { choosePersonaRules } from "./people";
 import { compose } from "./compose";
 import { computeSendWindow } from "./sendWindow";
 import { pushToUnify } from "./unify";
@@ -11,6 +11,7 @@ import type {
   IcpScore,
   IdentifyResult,
   LiveEngagement,
+  Outcome,
   Outreach,
   Persona,
   Research,
@@ -21,7 +22,7 @@ import type {
   VisitEvent,
 } from "./types";
 
-// ORCHESTRATOR. identify(), research(), scoreIcp(), choosePersona(),
+// ORCHESTRATOR. identify(), research(), scoreAndAdvise(), choosePersonaRules(),
 // compose(), computeSendWindow(), and pushToUnify() are all real now (see
 // lib/identify.ts, lib/research.ts, lib/score.ts, lib/people.ts,
 // lib/compose.ts, lib/sendWindow.ts, lib/unify.ts) — only engage's on-site
@@ -29,6 +30,12 @@ import type {
 // with a short simulated delay. withStep is the safety net that makes each
 // swap safe: a real call that errors or hangs degrades to fixture data
 // instead of taking the demo down.
+//
+// score and persona are still two separate pipeline steps (StepName is
+// fixed, and the dashboard visualizes each by name), but under the hood
+// they share ONE analyst agent call: scoreStep runs it and threads its
+// persona suggestion straight into personaStep's parameters, same as score
+// itself is already threaded forward — not a second agent call.
 
 const STEP_DURATION_MS: Record<StepName, [number, number]> = {
   identify: [400, 700],
@@ -114,12 +121,21 @@ async function researchStep(company: Company | undefined): Promise<Research> {
   return research(company);
 }
 
-async function scoreStep(company: Company | undefined, research: Research): Promise<IcpScore> {
+type ScoreStepResult = { score: IcpScore; scoreRules: IcpScore; analystPersona?: PersonaSuggestion };
+
+async function scoreStep(company: Company | undefined, research: Research): Promise<ScoreStepResult> {
   if (!company) {
     await wait(jitter(STEP_DURATION_MS.score));
-    return { score: 0, reasons: ["No company identified yet, so there's nothing to score."], verdict: "cold" };
+    const empty: IcpScore = {
+      score: 0,
+      reasons: [{ factor: "No company identified", points: 0, explanation: "There's nothing to score yet." }],
+      verdict: "cold",
+    };
+    return { score: empty, scoreRules: empty };
   }
-  return scoreIcp(company, research);
+  const rules = scoreIcpRules(company, research);
+  const { score, persona } = await scoreAndAdvise(company, research, rules);
+  return { score, scoreRules: rules, analystPersona: persona };
 }
 
 const DEFAULT_PERSONA: Persona = {
@@ -133,12 +149,17 @@ async function personaStep(
   research: Research,
   score: IcpScore,
   path: string,
+  analystPersona: PersonaSuggestion | undefined,
 ): Promise<Persona> {
   if (!company) {
     await wait(jitter(STEP_DURATION_MS.persona));
     return DEFAULT_PERSONA;
   }
-  return choosePersona(company, research, score, path);
+  // The analyst call already proposed a persona alongside the score — use it
+  // directly rather than spend a second agent call re-deriving the same
+  // thing. Only fall back to the rules table when that call didn't produce one.
+  if (analystPersona) return { ...analystPersona };
+  return choosePersonaRules(company, research, score, path);
 }
 
 type ComposeResult = { outreach: Outreach; engagement: LiveEngagement };
@@ -185,15 +206,64 @@ async function engageStep(
   return { engagement: shown, engagedAtMs: Date.now() - visit.ts };
 }
 
+// The single source of truth for what actually happened, read off the
+// engage step's own last recorded event — never a separate flag that could
+// drift out of sync with it.
+function deriveOutcome(session: Session): Outcome {
+  const engageEvents = session.steps.filter((e) => e.step === "engage");
+  const last = engageEvents[engageEvents.length - 1];
+  if (!last) return "queued-only";
+  if (last.status === "done") return "engaged";
+  if (last.status === "skipped") return "below-threshold";
+  return "queued-only"; // engage was attempted (hot/warm) but errored — we still have a brief
+}
+
 // Re-reads the session so this sees every field patched by every earlier
 // step (research, score, persona, outreach, engagement) without threading
-// each one through as its own parameter.
-async function unifyStep(visitId: string, visit: VisitEvent): Promise<{ unifyPush: UnifyPushResult; totalMs: number }> {
+// each one through as its own parameter. Also where the terminal state is
+// computed: whatever happens to unify itself, the pipeline has reached its
+// last step, so this is where finishedAtMs/outcome get set.
+async function unifyStep(
+  visitId: string,
+  visit: VisitEvent,
+): Promise<{ unifyPush: UnifyPushResult; totalMs: number; finishedAtMs: number; outcome: Outcome }> {
   const session = getSession(visitId);
   const unifyPush = session
     ? await pushToUnify(session)
     : ({ mode: "mock", skipped: true, reason: "Session not found" } satisfies UnifyPushResult);
-  return { unifyPush, totalMs: Date.now() - visit.ts };
+  const finishedAtMs = Date.now() - visit.ts;
+  const outcome = session ? deriveOutcome(session) : "failed";
+  return { unifyPush, totalMs: finishedAtMs, finishedAtMs, outcome };
+}
+
+// Mathematically incapable of running forever: independent of every step's
+// own timeout, this guarantees a terminal state exists 75s after visit
+// start no matter what broke or hung. Whichever of {watchdog, natural
+// completion} reaches patchSession first wins; the other is a no-op.
+const WATCHDOG_MS = 75_000;
+
+function armWatchdog(visitId: string, visit: VisitEvent): void {
+  setTimeout(() => {
+    const session = getSession(visitId);
+    if (!session || session.finishedAtMs !== undefined) return;
+
+    const finishedAtMs = Date.now() - visit.ts;
+    console.error(`[t60] visit=${visitId} WATCHDOG fired after ${finishedAtMs}ms — forcing outcome "failed"`);
+    patchSession(visitId, { finishedAtMs, outcome: "failed" });
+    emitStep({
+      visitId,
+      step: "unify",
+      status: "error",
+      ms: finishedAtMs,
+      note: "Watchdog: no terminal state 75s after visit start.",
+      payload: {
+        unifyPush: session.unifyPush ?? { mode: "mock", skipped: true, reason: "Watchdog timeout" },
+        totalMs: finishedAtMs,
+        finishedAtMs,
+        outcome: "failed",
+      },
+    });
+  }, WATCHDOG_MS);
 }
 
 // --- orchestration -----------------------------------------------------
@@ -205,6 +275,7 @@ async function runPipelineSteps(visitId: string): Promise<void> {
     return;
   }
   const { visit } = session;
+  armWatchdog(visitId, visit);
 
   const sendWindow = computeSendWindow(new Date(visit.ts));
 
@@ -228,18 +299,20 @@ async function runPipelineSteps(visitId: string): Promise<void> {
     (value) => ({ research: value }),
   );
 
-  const score = await withStep<IcpScore>(
+  const failedScore: IcpScore = { score: 0, reasons: [{ factor: "Score step failed", points: 0, explanation: "The scoring step errored or timed out." }], verdict: "cold" };
+  const scoreStepResult = await withStep<ScoreStepResult>(
     "score",
     visitId,
     () => scoreStep(company, researchResult),
-    { score: 0, reasons: ["Score step failed"], verdict: "cold" },
-    (value) => ({ score: value }),
+    { score: failedScore, scoreRules: failedScore },
+    (value) => ({ score: value.score, scoreRules: value.scoreRules }),
   );
+  const score = scoreStepResult.score;
 
   const persona = await withStep<Persona>(
     "persona",
     visitId,
-    () => personaStep(company, researchResult, score, visit.path),
+    () => personaStep(company, researchResult, score, visit.path, scoreStepResult.analystPersona),
     DEFAULT_PERSONA,
     (value) => ({ persona: value }),
   );
@@ -290,15 +363,22 @@ async function runPipelineSteps(visitId: string): Promise<void> {
     );
   }
 
-  await withStep<{ unifyPush: UnifyPushResult; totalMs: number }>(
+  await withStep<{ unifyPush: UnifyPushResult; totalMs: number; finishedAtMs: number; outcome: Outcome }>(
     "unify",
     visitId,
     () => unifyStep(visitId, visit),
     {
       unifyPush: { mode: "mock", skipped: true, reason: "Unify step failed" },
       totalMs: Date.now() - visit.ts,
+      finishedAtMs: Date.now() - visit.ts,
+      outcome: deriveOutcome(getSession(visitId) ?? session),
     },
-    (value) => ({ unifyPush: value.unifyPush, totalMs: value.totalMs }),
+    (value) => ({
+      unifyPush: value.unifyPush,
+      totalMs: value.totalMs,
+      finishedAtMs: value.finishedAtMs,
+      outcome: value.outcome,
+    }),
   );
 }
 

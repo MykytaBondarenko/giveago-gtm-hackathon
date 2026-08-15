@@ -5,6 +5,7 @@ import type {
   IcpScore,
   IdentifyResult,
   LiveEngagement,
+  Outcome,
   Outreach,
   Persona,
   Research,
@@ -37,9 +38,10 @@ const STEP_LABELS: Record<StepName, string> = {
 };
 
 type IdentifyPayload = { identify: IdentifyResult; sendWindow: SendWindowCalc };
+type ScorePayload = { score: IcpScore; scoreRules: IcpScore };
 type ComposePayload = { outreach: Outreach; engagement: LiveEngagement };
 type EngagePayload = { engagement: LiveEngagement; engagedAtMs: number };
-type UnifyPayload = { unifyPush: UnifyPushResult; totalMs: number };
+type UnifyPayload = { unifyPush: UnifyPushResult; totalMs: number; finishedAtMs: number; outcome: Outcome };
 
 // Sessions arriving via SSE after the initial snapshot are known only through
 // their StepEvent stream, so we rebuild each session incrementally.
@@ -62,7 +64,11 @@ function applyStepEvent(sessions: Session[], event: StepEvent): Session[] {
 
   const next: Session = { ...base, steps: [...base.steps, event] };
 
-  if (event.status === "done" && event.payload !== undefined) {
+  // withStep always includes a valid fallback payload on "error" (that's
+  // what patchSession wrote server-side too) — treating only "done" as
+  // payload-bearing left the client stuck on a stale placeholder whenever a
+  // step degraded, and made the watchdog's forced termination invisible.
+  if ((event.status === "done" || event.status === "error") && event.payload !== undefined) {
     switch (event.step) {
       case "identify": {
         const { identify, sendWindow } = event.payload as IdentifyPayload;
@@ -74,9 +80,12 @@ function applyStepEvent(sessions: Session[], event: StepEvent): Session[] {
       case "research":
         next.research = event.payload as Research;
         break;
-      case "score":
-        next.score = event.payload as IcpScore;
+      case "score": {
+        const { score, scoreRules } = event.payload as ScorePayload;
+        next.score = score;
+        next.scoreRules = scoreRules;
         break;
+      }
       case "persona":
         next.persona = event.payload as Persona;
         break;
@@ -92,9 +101,11 @@ function applyStepEvent(sessions: Session[], event: StepEvent): Session[] {
         break;
       }
       case "unify": {
-        const { unifyPush, totalMs } = event.payload as UnifyPayload;
+        const { unifyPush, totalMs, finishedAtMs, outcome } = event.payload as UnifyPayload;
         next.unifyPush = unifyPush;
         next.totalMs = totalMs;
+        next.finishedAtMs = finishedAtMs;
+        next.outcome = outcome;
         break;
       }
     }
@@ -130,6 +141,17 @@ function formatCountdown(ms: number): string {
   if (hours === 0) return `${minutes}m`;
   return `${hours}h ${minutes}m`;
 }
+
+// A cold visitor is a screening success, not a dead end — every outcome
+// except a genuine pipeline failure reads as the same green "it worked"
+// state. Only "failed" (the watchdog firing, or a broken run) gets a
+// different, degraded treatment.
+const OUTCOME_LABELS: Record<Outcome, (seconds: string) => string> = {
+  engaged: (s) => `Live message delivered in ${s}s`,
+  "queued-only": (s) => `Brief ready for the rep in ${s}s`,
+  "below-threshold": (s) => `Screened out in ${s}s — no contact made`,
+  failed: (s) => `Pipeline degraded — completed in ${s}s`,
+};
 
 const VERDICT_STYLES: Record<IcpScore["verdict"], string> = {
   hot: "bg-emerald-500/15 text-emerald-400 border-emerald-500/40",
@@ -214,37 +236,67 @@ export default function DashboardPage() {
     [sessions, activeId],
   );
 
-  const ourLaneFrozen = activeSession?.engagedAtMs !== undefined;
+  // Freezes on finishedAtMs — set once, by the pipeline, when its LAST step
+  // resolves, regardless of which outcome that turned out to be. Never tied
+  // to one specific step again, so it cannot run forever.
   const ourLaneMs = activeSession
-    ? (activeSession.engagedAtMs ?? Date.now() - activeSession.visit.ts)
+    ? (activeSession.finishedAtMs ?? Date.now() - activeSession.visit.ts)
     : 0;
 
   const standardLaneMs = activeSession?.sendWindow
     ? new Date(activeSession.sendWindow.nextAllowedSendUtc).getTime() - Date.now()
     : null;
 
+  const outcome = activeSession?.outcome;
+  const isFailed = outcome === "failed";
+  const ourLaneSublabel = outcome
+    ? OUTCOME_LABELS[outcome](String(Math.round(ourLaneMs / 1000)))
+    : "counting up since visit";
+  // Each variant's classes are written out in full below (not built with
+  // string interpolation) — Tailwind's scanner only generates CSS for class
+  // names it can find as complete literal tokens in the source.
+  const ourLaneTone = isFailed
+    ? {
+        box: "border-amber-500/30 bg-amber-500/[0.04]",
+        label: "text-amber-400/80",
+        big: "text-amber-400",
+        sub: "text-amber-400/60",
+      }
+    : {
+        box: "border-emerald-500/30 bg-emerald-500/[0.04]",
+        label: "text-emerald-400/80",
+        big: "text-emerald-400",
+        sub: "text-emerald-400/60",
+      };
+
   return (
     <main className="flex-1 flex flex-col gap-8 p-8 max-w-[1600px] mx-auto w-full">
-      <header>
+      <header className="flex items-baseline justify-between gap-4">
         <h1 className="text-2xl font-semibold tracking-tight text-white/90">
           T60 <span className="text-white/40">—</span> inbound response in under 60 seconds
         </h1>
+        <a
+          href="/api/diag"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-xs uppercase tracking-widest text-white/40 hover:text-white/70 transition-colors"
+        >
+          Diagnostics →
+        </a>
       </header>
 
       <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/[0.04] p-8 flex flex-col items-center justify-center gap-2">
-          <span className="uppercase tracking-widest text-sm font-semibold text-emerald-400/80">
+        <div className={`rounded-2xl border ${ourLaneTone.box} p-8 flex flex-col items-center justify-center gap-2`}>
+          <span className={`uppercase tracking-widest text-sm font-semibold ${ourLaneTone.label}`}>
             Our lane
           </span>
           <span
-            className="font-mono font-bold text-emerald-400 leading-none tabular-nums"
+            className={`font-mono font-bold ${ourLaneTone.big} leading-none tabular-nums`}
             style={{ fontSize: "clamp(4rem, 12vw, 9rem)" }}
           >
             {activeSession ? formatElapsed(ourLaneMs) : "—"}
           </span>
-          <span className="text-emerald-400/60 text-sm">
-            {ourLaneFrozen ? "engaged on-site" : "counting up since visit"}
-          </span>
+          <span className={`${ourLaneTone.sub} text-sm`}>{ourLaneSublabel}</span>
         </div>
 
         <div className="rounded-2xl border border-red-500/20 bg-red-500/[0.03] p-8 flex flex-col items-center justify-center gap-2">
@@ -362,7 +414,7 @@ function stepColor(status: StepStatus): string {
 }
 
 function ResultsPanel({ session }: { session: Session }) {
-  const { company, identify, research, score, persona, outreach, engagement, engagedAtMs, unifyPush, totalMs } = session;
+  const { company, identify, research, score, scoreRules, persona, outreach, engagement, engagedAtMs, unifyPush, totalMs } = session;
   const engageInfo = getStepInfo(session, "engage");
 
   return (
@@ -410,10 +462,41 @@ function ResultsPanel({ session }: { session: Session }) {
             </div>
             {score ? (
               <>
-                <div className="text-4xl font-bold text-white/90 tabular-nums">{score.score}</div>
-                <ul className="mt-3 space-y-1 text-sm text-white/60 list-disc list-inside">
-                  {score.reasons.map((reason) => (
-                    <li key={reason}>{reason}</li>
+                <div className="flex items-baseline gap-3 flex-wrap">
+                  <div className="text-4xl font-bold text-white/90 tabular-nums">{score.score}</div>
+                  {scoreRules && (
+                    <div className="text-xs text-white/35">
+                      rules baseline: <span className="tabular-nums">{scoreRules.score}</span>
+                      {Math.abs(score.score - scoreRules.score) > 20 && (
+                        <span
+                          className="ml-1.5 text-amber-400/80"
+                          title={`Agent and rules baseline diverge by ${Math.abs(score.score - scoreRules.score)} points — interesting, not necessarily wrong.`}
+                        >
+                          ⚠ diverges {Math.abs(score.score - scoreRules.score)}pt
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+                {score.scoreSource === "rules-fallback" && (
+                  <div className="mt-1 text-[10px] uppercase tracking-wide text-white/30">
+                    Analyst agent unavailable — rules score shown
+                  </div>
+                )}
+                <ul className="mt-3 space-y-2 text-sm text-white/60">
+                  {score.reasons.map((reason, i) => (
+                    <li key={`${reason.factor}-${i}`} className="flex items-baseline gap-2">
+                      <span
+                        className={`font-mono text-xs tabular-nums shrink-0 ${
+                          reason.points > 0 ? "text-emerald-400/80" : reason.points < 0 ? "text-rose-400/80" : "text-white/40"
+                        }`}
+                      >
+                        {reason.points > 0 ? `+${reason.points}` : reason.points}
+                      </span>
+                      <span>
+                        <span className="text-white/80 font-medium">{reason.factor}:</span> {reason.explanation}
+                      </span>
+                    </li>
                   ))}
                 </ul>
               </>
@@ -463,9 +546,9 @@ function ResultsPanel({ session }: { session: Session }) {
                         </span>
                         <span>{signal.text}</span>
                       </div>
-                      {(signal.date || signal.source) && (
+                      {(signal.date || signal.sourceUrl) && (
                         <div className="ml-16 mt-1 text-xs text-white/35">
-                          {[signal.date, signal.source].filter(Boolean).join(" · ")}
+                          {[signal.date, signal.sourceUrl].filter(Boolean).join(" · ")}
                         </div>
                       )}
                     </li>

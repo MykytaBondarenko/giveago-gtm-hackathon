@@ -19,11 +19,17 @@ export interface Company {
   hqCountry?: string;
 }
 
+export type SignalCategory = "hiring" | "funding" | "product" | "incident" | "expansion" | "tech";
+
 export interface Signal {
   text: string;
   origin: "unify" | "agent";
+  category: SignalCategory;
   date?: string;
-  source?: string;
+  // Optional: a Unify custom-attribute signal has no per-field URL. Absence
+  // is what drives the "unsourced" marker in the Signals panel — never
+  // fabricate one to fill the gap.
+  sourceUrl?: string;
 }
 
 export interface Research {
@@ -34,10 +40,24 @@ export interface Research {
   degraded: boolean;
 }
 
+export interface ScoreReason {
+  factor: string;
+  points: number;
+  explanation: string;
+}
+
 export interface IcpScore {
   score: number;
-  reasons: string[];
+  reasons: ScoreReason[];
   verdict: "hot" | "warm" | "cold";
+  confidence?: number;
+  // Which research.signals[] index most justified this score — the same
+  // signal the Signals panel pulls out as "the hook" and compose points
+  // outreach copy at. Undefined when there were no signals to point to.
+  topSignal?: number;
+  // Set only when the primary score came from the rules fallback (agent
+  // unavailable or failed validation twice) — absent means the agent scored it.
+  scoreSource?: "agent" | "rules-fallback";
 }
 
 export interface Persona {
@@ -81,6 +101,12 @@ export interface UnifyOperationResult {
   error?: string;
 }
 
+// The session's single terminal state. Set exactly once, by the pipeline,
+// when the LAST step resolves — no matter whether that step (or any step)
+// succeeded, was skipped, or errored. Nothing in the UI should ever freeze
+// on a specific step name again; everything freezes on this.
+export type Outcome = "engaged" | "queued-only" | "below-threshold" | "failed";
+
 export interface UnifyPushResult {
   mode: "mock" | "dry-run" | "live";
   skipped?: boolean;
@@ -114,6 +140,9 @@ export interface Session {
   company?: Company;
   research?: Research;
   score?: IcpScore;
+  // Deterministic scoreIcpRules() output, computed alongside the agent score
+  // every run — the muted "rules baseline" comparison shown next to it.
+  scoreRules?: IcpScore;
   persona?: Persona;
   outreach?: Outreach;
   engagement?: LiveEngagement;
@@ -123,4 +152,6 @@ export interface Session {
   totalMs?: number;
   engagedAtMs?: number;
   engagementDismissedAt?: number;
+  finishedAtMs?: number;
+  outcome?: Outcome;
 }

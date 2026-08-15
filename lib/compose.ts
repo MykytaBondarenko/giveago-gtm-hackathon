@@ -1,5 +1,5 @@
-import OpenAI from "openai";
 import { z } from "zod";
+import { AgentError, runAgent } from "./agent";
 import type { Company, IcpScore, LiveEngagement, Outreach, Persona, Research, Signal, VisitEvent } from "./types";
 
 // Both artefacts (email + banner) come from ONE OpenAI call — see compose()
@@ -35,8 +35,6 @@ export function guardrails(text: string): string[] {
   const lower = text.toLowerCase();
   return BANNED_PHRASES.filter((phrase) => lower.includes(phrase));
 }
-
-class MalformedOutputError extends Error {}
 
 function isDemoSafe(): boolean {
   return process.env.DEMO_SAFE === "1";
@@ -86,65 +84,6 @@ function hasGreetingOrSignature(text: string): boolean {
   return greetingStarts.some((g) => t.startsWith(g)) || signatureMarkers.some((s) => t.includes(s));
 }
 
-const composeSchema = z
-  .object({
-    email: z
-      .object({
-        subject: z.string().min(1),
-        body: z.string().min(1),
-        repBrief: z.array(z.string().min(1)).min(3).max(5),
-      })
-      .strict(),
-    banner: z
-      .object({
-        headline: z.string().min(1),
-        line: z.string().min(1),
-        cta: z.string().min(1),
-      })
-      .strict(),
-  })
-  .strict();
-
-type ComposeJson = z.infer<typeof composeSchema>;
-
-function validateCompose(raw: string, research: Research): ComposeJson {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new MalformedOutputError("Response was not valid JSON.");
-  }
-
-  const result = composeSchema.safeParse(parsed);
-  if (!result.success) throw new MalformedOutputError(`JSON did not match the expected shape: ${result.error.message}`);
-
-  const { email, banner } = result.data;
-  const violations: string[] = [];
-
-  if (wordCount(email.subject) >= 8) violations.push("Subject must be under 8 words.");
-  if (email.subject !== email.subject.toLowerCase()) violations.push("Subject must be entirely lowercase.");
-  if (email.subject.includes("!")) violations.push("Subject must not contain an exclamation mark.");
-  if (email.subject.toLowerCase().includes("quick question")) violations.push('Subject must never say "quick question".');
-
-  if (wordCount(email.body) >= 90) violations.push("Body must be under 90 words.");
-  const bodyLines = email.body.split("\n").filter((l) => l.trim().length > 0);
-  if (bodyLines.length > 4) violations.push("Body must be at most four short lines.");
-  if (!isPlainText(email.body)) violations.push("Body must be plain text — no markdown or HTML.");
-  if (bodyLines[0] && !line1ReferencesASignal(bodyLines[0], research.signals)) {
-    violations.push("The first line of the body must reference one specific signal by name from the research.");
-  }
-
-  if (wordCount(banner.headline) > 8) violations.push("Banner headline must be at most 8 words.");
-  if (wordCount(banner.line) > 20) violations.push("Banner line must be at most 20 words.");
-  if (wordCount(banner.cta) > 4) violations.push("Banner CTA must be at most 4 words.");
-  if (hasGreetingOrSignature(banner.line)) violations.push("Banner line must not contain a greeting or signature.");
-  if (hasMeetingAsk(banner.line)) violations.push("Banner line must not contain a meeting ask — that belongs in the email.");
-
-  if (violations.length > 0) throw new MalformedOutputError(violations.join(" "));
-
-  return { email, banner };
-}
-
 function runGuardrails(email: { body: string }, banner: { headline: string; line: string; cta: string }): string[] {
   return [
     ...guardrails(email.body).map((p) => `email body: "${p}"`),
@@ -154,6 +93,64 @@ function runGuardrails(email: { body: string }, banner: { headline: string; line
   ];
 }
 
+// All structural rules (word/line limits, banned phrasing) live inside the
+// schema — not a separate validation pass — so runAgent's built-in
+// retry-once-with-reason loop covers them for free. `research` is closed
+// over per-call since "line 1 references a signal" needs it.
+function buildComposeSchema(research: Research) {
+  return z
+    .object({
+      email: z
+        .object({
+          subject: z.string().min(1),
+          body: z.string().min(1),
+          repBrief: z.array(z.string().min(1)).min(3).max(5),
+        })
+        .strict(),
+      banner: z
+        .object({
+          headline: z.string().min(1),
+          line: z.string().min(1),
+          cta: z.string().min(1),
+        })
+        .strict(),
+    })
+    .strict()
+    .superRefine((data, ctx) => {
+      const { email, banner } = data;
+      const issue = (message: string, path: (string | number)[]) => ctx.addIssue({ code: z.ZodIssueCode.custom, message, path });
+
+      if (wordCount(email.subject) >= 8) issue("Subject must be under 8 words.", ["email", "subject"]);
+      if (email.subject !== email.subject.toLowerCase()) issue("Subject must be entirely lowercase.", ["email", "subject"]);
+      if (email.subject.includes("!")) issue("Subject must not contain an exclamation mark.", ["email", "subject"]);
+      if (email.subject.toLowerCase().includes("quick question")) issue('Subject must never say "quick question".', ["email", "subject"]);
+
+      if (wordCount(email.body) >= 90) issue("Body must be under 90 words.", ["email", "body"]);
+      const bodyLines = email.body.split("\n").filter((l) => l.trim().length > 0);
+      if (bodyLines.length > 4) issue("Body must be at most four short lines.", ["email", "body"]);
+      if (!isPlainText(email.body)) issue("Body must be plain text — no markdown or HTML.", ["email", "body"]);
+      if (bodyLines[0] && !line1ReferencesASignal(bodyLines[0], research.signals)) {
+        issue("The first line of the body must reference one specific signal by name from the research.", ["email", "body"]);
+      }
+
+      if (wordCount(banner.headline) > 8) issue("Banner headline must be at most 8 words.", ["banner", "headline"]);
+      if (wordCount(banner.line) > 20) issue("Banner line must be at most 20 words.", ["banner", "line"]);
+      if (wordCount(banner.cta) > 4) issue("Banner CTA must be at most 4 words.", ["banner", "cta"]);
+      if (hasGreetingOrSignature(banner.line)) issue("Banner line must not contain a greeting or signature.", ["banner", "line"]);
+      if (hasMeetingAsk(banner.line)) issue("Banner line must not contain a meeting ask — that belongs in the email.", ["banner", "line"]);
+
+      const guardrailViolations = runGuardrails(email, banner);
+      if (guardrailViolations.length > 0) {
+        issue(
+          `Guardrails flagged banned phrasing: ${guardrailViolations.join("; ")}. Rewrite without any of these words or implications.`,
+          ["email", "body"],
+        );
+      }
+    });
+}
+
+type ComposeJson = z.infer<ReturnType<typeof buildComposeSchema>>;
+
 type ComposeContext = {
   company: Company;
   research: Research;
@@ -162,21 +159,21 @@ type ComposeContext = {
   visit: VisitEvent;
 };
 
-function modelPrompt(ctx: ComposeContext, retryReason?: string): string {
+const COMPOSE_INSTRUCTIONS = `You are writing cold outbound copy for Northwind, an observability platform for payments infrastructure. Return STRICT JSON only — no Markdown, no code fences, no prose outside the JSON object.
+
+Never write any of the following, or anything that means the same thing: "I hope this finds you well", "I came across your company", "I noticed you're doing great things", "we noticed", "we saw", "you're browsing", "welcome back", "I see you", "I noticed you", or any mention of the recipient's website visit, browsing, or of us noticing/watching/tracking them. We never say we tracked anyone — it's creepy and legally unwise.`;
+
+function composeInput(ctx: ComposeContext): string {
   const { company, research, score, persona, visit } = ctx;
 
   const signalsList =
     research.signals.length > 0
-      ? research.signals.map((s, i) => `${i + 1}. ${s.text}${s.date ? ` (${s.date})` : ""}`).join("\n")
+      ? research.signals
+          .map((s, i) => `${i + 1}. ${s.text}${s.date ? ` (${s.date})` : ""}${i === score.topSignal ? " — THE HOOK: the analyst rated this the single most-justifying signal; prefer it in line 1" : ""}`)
+          .join("\n")
       : "No specific research signals are available — open with a concrete detail about what the company does instead.";
 
-  const retryBlock = retryReason
-    ? `\nYour previous attempt was rejected for this reason: ${retryReason}\nFix this exactly and follow every rule below precisely.\n`
-    : "";
-
-  return `You are writing cold outbound copy for Northwind, an observability platform for payments infrastructure. Return STRICT JSON only — no Markdown, no code fences, no prose outside the JSON object.
-${retryBlock}
-Context:
+  return `Context:
 - Company: ${company.name} (${company.domain}), industry: ${company.industry ?? "unknown"}
 - What they do: ${research.summary}
 - Research signals:
@@ -197,50 +194,7 @@ Return exactly this JSON shape:
     "line": "max 20 words, present tense, no greeting, no signature, no meeting ask — references the company and the visited page topic only",
     "cta": "max 4 words"
   }
-}
-
-Never write any of the following, or anything that means the same thing: "I hope this finds you well", "I came across your company", "I noticed you're doing great things", "we noticed", "we saw", "you're browsing", "welcome back", "I see you", "I noticed you", or any mention of the recipient's website visit, browsing, or of us noticing/watching/tracking them. We never say we tracked anyone — it's creepy and legally unwise.`;
-}
-
-type AttemptResult = { ok: true; email: ComposeJson["email"]; banner: ComposeJson["banner"] } | { ok: false; reason: string };
-
-async function attemptCompose(ctx: ComposeContext, deadline: number, retryReason?: string): Promise<AttemptResult> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return { ok: false, reason: "OPENAI_API_KEY is not configured" };
-
-  const remainingMs = deadline - Date.now();
-  if (remainingMs <= 0) return { ok: false, reason: "Ran out of time." };
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), remainingMs);
-
-  try {
-    const client = new OpenAI({ apiKey, maxRetries: 0, timeout: Math.min(COMPOSE_TIMEOUT_MS, remainingMs) });
-    const response = await client.responses.create(
-      { model: "gpt-4.1-mini", input: modelPrompt(ctx, retryReason) },
-      { signal: controller.signal, timeout: Math.min(COMPOSE_TIMEOUT_MS, remainingMs), maxRetries: 0 },
-    );
-
-    const raw = response.output_text;
-    console.log(`[t60] compose model-output domain=${ctx.company.domain} raw=${raw}`);
-
-    const { email, banner } = validateCompose(raw, ctx.research);
-
-    const guardrailViolations = runGuardrails(email, banner);
-    if (guardrailViolations.length > 0) {
-      return {
-        ok: false,
-        reason: `Guardrails flagged banned phrasing: ${guardrailViolations.join("; ")}. Rewrite without any of these words or implications.`,
-      };
-    }
-
-    return { ok: true, email, banner };
-  } catch (err) {
-    if (err instanceof MalformedOutputError) return { ok: false, reason: err.message };
-    return { ok: false, reason: "The request failed or timed out." };
-  } finally {
-    clearTimeout(timeout);
-  }
+}`;
 }
 
 function pageTopic(path: string): string {
@@ -256,8 +210,11 @@ function pageTopic(path: string): string {
 // construction — the safety net when both attempts fail or nothing is
 // configured. Still grounded in real signal/page data, never generic filler.
 function safeTemplate(ctx: ComposeContext): { outreach: Outreach; engagement: LiveEngagement } {
-  const { company, research, persona, visit } = ctx;
-  const signal = research.signals[0];
+  const { company, research, score, persona, visit } = ctx;
+  // Prefer the analyst's most-justifying signal so the email's hook is the
+  // same fact the Signals panel highlights — the causality Block 7 wants
+  // visible holds even on the deterministic fallback path.
+  const signal = research.signals[score.topSignal ?? 0];
   const hook = signal ? signal.text : `${company.name}'s work in ${company.industry ?? "payments"}`;
   const hookLower = hook.charAt(0).toLowerCase() + hook.slice(1);
 
@@ -294,21 +251,26 @@ export async function compose(
 ): Promise<{ outreach: Outreach; engagement: LiveEngagement }> {
   const ctx: ComposeContext = { company, research, score, persona, visit };
 
-  if (isDemoSafe()) return safeTemplate(ctx);
-
-  const deadline = Date.now() + COMPOSE_TIMEOUT_MS;
-
-  let attempt = await attemptCompose(ctx, deadline);
-  if (!attempt.ok) {
-    attempt = await attemptCompose(ctx, deadline, attempt.reason);
+  if (isDemoSafe()) {
+    console.log(`[t60] compose MOCKED domain=${company.domain} — DEMO_SAFE is set, using template`);
+    return safeTemplate(ctx);
   }
 
-  if (attempt.ok) {
+  try {
+    const result = await runAgent<ComposeJson>({
+      name: "compose",
+      instructions: COMPOSE_INSTRUCTIONS,
+      input: composeInput(ctx),
+      schema: buildComposeSchema(research),
+      timeoutMs: COMPOSE_TIMEOUT_MS,
+    });
     return {
-      outreach: { subject: attempt.email.subject, body: attempt.email.body, repBrief: attempt.email.repBrief, guardrailsPassed: true },
-      engagement: { headline: attempt.banner.headline, line: attempt.banner.line, cta: attempt.banner.cta, dismissible: true },
+      outreach: { subject: result.email.subject, body: result.email.body, repBrief: result.email.repBrief, guardrailsPassed: true },
+      engagement: { headline: result.banner.headline, line: result.banner.line, cta: result.banner.cta, dismissible: true },
     };
+  } catch (error) {
+    const reason = error instanceof AgentError ? error.message : error instanceof Error ? error.message : "unknown error";
+    console.error(`[t60] compose FALLING THROUGH to template for domain=${company.domain} — reason: ${reason}`);
+    return safeTemplate(ctx);
   }
-
-  return safeTemplate(ctx);
 }
