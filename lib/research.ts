@@ -19,12 +19,35 @@ const UNIFY_TIMEOUT_MS = 6_000;
 const OPENAI_TIMEOUT_MS = 12_000;
 const MOCK_DELAY_MS = 800;
 
+// Standard Company object fields (docs.unifygtm.com/developers/api/data/standard-objects)
+// are firmographics, not signals — they're already shown on the Company
+// card. Everything else on the record is a custom attribute, which is
+// exactly how an Infinity Signal's output surfaces here: Unify has no
+// separate API for it (confirmed against the Data API docs — custom
+// attributes, Infinity Signal included, are just fields on the record), so
+// reading every non-standard attribute already covers it with no extra call.
 const ignoredUnifyAttributes = new Set([
   "id",
   "name",
   "domain",
   "website",
   "description",
+  "industry",
+  "employee_count",
+  "revenue",
+  "founded",
+  "address",
+  "time_zone",
+  "corporate_phone",
+  "linkedin_url",
+  "status",
+  "lead_source",
+  "do_not_contact",
+  "record_owner",
+  "hubspot_url",
+  "salesforce_url",
+  "last_activity_at",
+  "last_website_activity_at",
   "created_at",
   "updated_at",
 ]);
@@ -116,6 +139,9 @@ function getUnifySignals(record: UnifyRecord): Signal[] {
 
   for (const [attribute, value] of Object.entries(record.attributes ?? {})) {
     if (ignoredUnifyAttributes.has(attribute.toLowerCase())) continue;
+    // A custom boolean attribute (e.g. an Infinity Signal detector) is only
+    // sales-actionable when it fired true; "false" is an absence, not a signal.
+    if (value === false) continue;
     const formatted = formatAttributeValue(value);
     if (!formatted) continue;
 
