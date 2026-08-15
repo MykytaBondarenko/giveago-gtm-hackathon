@@ -314,7 +314,7 @@ function stepColor(status: StepStatus): string {
 }
 
 function ResultsPanel({ session }: { session: Session }) {
-  const { company, score, persona, outreach } = session;
+  const { company, research, score, persona, outreach } = session;
 
   return (
     <div className="grid grid-cols-1 xl:grid-cols-[1fr_1fr_260px] gap-6 items-start">
@@ -372,6 +372,50 @@ function ResultsPanel({ session }: { session: Session }) {
             </>
           ) : (
             <div className="text-white/30 text-sm">Selecting…</div>
+          )}
+        </div>
+
+        <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
+          <div className="flex items-center gap-2 mb-3">
+            <h2 className="text-sm uppercase tracking-widest text-white/40">Signals</h2>
+            {research?.degraded && (
+              <span
+                aria-label="Research is degraded"
+                title="One or more research sources were unavailable; fallback data may be shown."
+                className="h-2 w-2 rounded-full bg-amber-400"
+              />
+            )}
+          </div>
+          {research ? (
+            research.signals.length > 0 ? (
+              <ul className="space-y-3">
+                {research.signals.map((signal, index) => (
+                  <li key={`${signal.origin}-${signal.text}-${index}`} className="text-sm text-white/65">
+                    <div className="flex items-start gap-2">
+                      <span
+                        className={`mt-0.5 rounded border px-1.5 py-0.5 text-[10px] font-semibold tracking-wide ${
+                          signal.origin === "unify"
+                            ? "border-sky-400/40 bg-sky-400/10 text-sky-300"
+                            : "border-violet-400/40 bg-violet-400/10 text-violet-300"
+                        }`}
+                      >
+                        {signal.origin === "unify" ? "UNIFY" : "AGENT"}
+                      </span>
+                      <span>{signal.text}</span>
+                    </div>
+                    {(signal.date || signal.source) && (
+                      <div className="ml-16 mt-1 text-xs text-white/35">
+                        {[signal.date, signal.source].filter(Boolean).join(" · ")}
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="text-white/30 text-sm">No signals returned yet.</div>
+            )
+          ) : (
+            <div className="text-white/30 text-sm">Researching…</div>
           )}
         </div>
       </div>
