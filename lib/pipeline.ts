@@ -4,6 +4,7 @@ import { research } from "./research";
 import { identify } from "./identify";
 import { scoreIcp } from "./score";
 import { choosePersona } from "./people";
+import { compose } from "./compose";
 import type {
   Company,
   IcpScore,
@@ -219,45 +220,48 @@ async function personaStep(
   return choosePersona(company, research, score, path);
 }
 
-async function composeStep(company: Company | undefined, persona: Persona): Promise<Outreach> {
-  await wait(jitter(STEP_DURATION_MS.compose));
+type ComposeResult = { outreach: Outreach; engagement: LiveEngagement };
 
+// One call produces both the email and the banner copy together (see
+// lib/compose.ts) — the "no company" branch here is the only place that
+// still hand-writes both, since compose() assumes a real company to work with.
+async function composeStep(
+  company: Company | undefined,
+  research: Research,
+  score: IcpScore,
+  persona: Persona,
+  visit: VisitEvent,
+): Promise<ComposeResult> {
   if (!company) {
+    await wait(jitter(STEP_DURATION_MS.compose));
     return {
-      subject: "Following up on your visit",
-      body: "Hi there,\n\nThanks for stopping by Northwind. Happy to answer any questions about observability for payments infrastructure.\n\nBest,\nThe Northwind Team",
-      repBrief: ["No company match yet — keep the note generic", "Offer a resource instead of a hard ask"],
+      outreach: {
+        subject: "thanks for stopping by",
+        body: "Hi there,\nThanks for checking out Northwind.\nHappy to answer any questions about payments observability.",
+        repBrief: ["No company identified yet — keep this generic", "Offer a resource instead of a hard ask"],
+        guardrailsPassed: true,
+      },
+      engagement: {
+        headline: "Still exploring options?",
+        line: "Most teams start with a short fit check.",
+        cta: "Grab a time",
+        dismissible: true,
+      },
     };
   }
 
-  return {
-    subject: `Quick thought for ${company.name}`,
-    body: `Hi there,\n\nNoticed ${company.name} has been active lately, and figured it was worth a quick note to the ${persona.department.toLowerCase()} team about observability for payments infrastructure.\n\nWorth 15 minutes this week?\n\nBest,\nThe Northwind Team`,
-    repBrief: [
-      "Lead with the most recent signal, not a generic intro",
-      `Address the ${persona.title}, not a generic contact`,
-      "Keep the ask to 15 minutes, no deck",
-    ],
-  };
+  return compose(company, research, score, persona, visit);
 }
 
+// The banner's copy was already written in the compose step — this step is
+// the act of actually putting it live, so it's what sets shownAt/engagedAtMs.
 async function engageStep(
-  company: Company | undefined,
+  engagement: LiveEngagement,
   visit: VisitEvent,
 ): Promise<{ engagement: LiveEngagement; engagedAtMs: number }> {
   await wait(jitter(STEP_DURATION_MS.engage));
-
-  const engagement: LiveEngagement = {
-    headline: "Still exploring options?",
-    line: company
-      ? `Teams like ${company.name} usually start with a 15-minute fit check.`
-      : "Most teams start with a 15-minute fit check.",
-    cta: "Grab a time",
-    dismissible: true,
-    shownAt: Date.now(),
-  };
-
-  return { engagement, engagedAtMs: Date.now() - visit.ts };
+  const shown: LiveEngagement = { ...engagement, shownAt: Date.now() };
+  return { engagement: shown, engagedAtMs: Date.now() - visit.ts };
 }
 
 async function unifyStep(visit: VisitEvent): Promise<{ unifyRef: string; totalMs: number }> {
@@ -313,26 +317,35 @@ async function runPipelineSteps(visitId: string): Promise<void> {
     (value) => ({ persona: value }),
   );
 
-  await withStep<Outreach>(
+  const composeResult = await withStep<ComposeResult>(
     "compose",
     visitId,
-    () => composeStep(company, persona),
+    () => composeStep(company, researchResult, score, persona, visit),
     {
-      subject: "Following up",
-      body: "Hi there,\n\nThanks for stopping by. We'll follow up shortly.\n\nBest,\nThe Northwind Team",
-      repBrief: ["Compose step failed — keep this generic until retried"],
+      outreach: {
+        subject: "following up",
+        body: "Hi there,\nThanks for stopping by. We'll follow up shortly.",
+        repBrief: ["Compose step failed — keep this generic until retried"],
+        guardrailsPassed: true,
+      },
+      engagement: {
+        headline: "Still exploring options?",
+        line: "Most teams start with a short fit check.",
+        cta: "Grab a time",
+        dismissible: true,
+      },
     },
-    (value) => ({ outreach: value }),
+    (value) => ({ outreach: value.outreach }),
   );
 
   await withStep<{ engagement: LiveEngagement; engagedAtMs: number }>(
     "engage",
     visitId,
-    () => engageStep(company, visit),
+    () => engageStep(composeResult.engagement, visit),
     {
       engagement: {
         headline: "Still exploring options?",
-        line: "Most teams start with a 15-minute fit check.",
+        line: "Most teams start with a short fit check.",
         cta: "Grab a time",
         dismissible: true,
         shownAt: Date.now(),

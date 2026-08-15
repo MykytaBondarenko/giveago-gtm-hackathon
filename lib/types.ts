@@ -50,6 +50,7 @@ export interface Outreach {
   subject: string;
   body: string;
   repBrief: string[];
+  guardrailsPassed: boolean;
 }
 
 export interface LiveEngagement {

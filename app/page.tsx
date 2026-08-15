@@ -35,6 +35,7 @@ const STEP_LABELS: Record<StepName, string> = {
 };
 
 type IdentifyPayload = { identify: IdentifyResult; sendWindow: SendWindowCalc };
+type ComposePayload = { outreach: Outreach; engagement: LiveEngagement };
 type EngagePayload = { engagement: LiveEngagement; engagedAtMs: number };
 type UnifyPayload = { unifyRef: string; totalMs: number };
 
@@ -77,9 +78,11 @@ function applyStepEvent(sessions: Session[], event: StepEvent): Session[] {
       case "persona":
         next.persona = event.payload as Persona;
         break;
-      case "compose":
-        next.outreach = event.payload as Outreach;
+      case "compose": {
+        const { outreach } = event.payload as ComposePayload;
+        next.outreach = outreach;
         break;
+      }
       case "engage": {
         const { engagement, engagedAtMs } = event.payload as EngagePayload;
         next.engagement = engagement;
@@ -479,16 +482,35 @@ function ResultsPanel({ session }: { session: Session }) {
           <span className="w-2.5 h-2.5 rounded-full bg-amber-400/60" />
           <span className="w-2.5 h-2.5 rounded-full bg-emerald-400/60" />
           <span className="ml-2 text-xs text-white/40">Draft — dry-run</span>
+          {outreach?.guardrailsPassed && (
+            <span className="ml-auto flex items-center gap-1 text-xs font-medium text-emerald-400">
+              <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5">
+                <path
+                  fillRule="evenodd"
+                  d="M16.7 5.3a1 1 0 0 1 0 1.4l-7.5 7.5a1 1 0 0 1-1.4 0l-3.5-3.5a1 1 0 1 1 1.4-1.4l2.8 2.8 6.8-6.8a1 1 0 0 1 1.4 0Z"
+                  clipRule="evenodd"
+                />
+              </svg>
+              guardrails passed
+            </span>
+          )}
         </div>
         {outreach ? (
           <>
             <div className="p-5 flex flex-col gap-3">
-              <div className="text-sm text-white/40">Subject</div>
-              <div className="text-white/90 font-medium">{outreach.subject}</div>
-              <div className="text-sm text-white/40 mt-2">Body</div>
-              <pre className="whitespace-pre-wrap font-sans text-white/70 text-sm leading-relaxed">
-                {outreach.body}
-              </pre>
+              <div className="flex items-baseline gap-2 text-sm">
+                <span className="text-white/40 w-14 shrink-0">To</span>
+                <span className="text-white/70">{persona?.title ?? "Target persona"}</span>
+              </div>
+              <div className="flex items-baseline gap-2 text-sm">
+                <span className="text-white/40 w-14 shrink-0">Subject</span>
+                <span className="text-white/90 font-medium">{outreach.subject}</span>
+              </div>
+              <div className="border-t border-white/10 pt-3 mt-1">
+                <pre className="whitespace-pre-wrap font-sans text-white/80 text-base leading-relaxed">
+                  {outreach.body}
+                </pre>
+              </div>
             </div>
             <div className="mt-auto border-t border-white/10 p-5">
               <div className="text-xs uppercase tracking-widest text-white/40 mb-2">Rep brief</div>
