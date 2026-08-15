@@ -132,6 +132,48 @@ const VERDICT_STYLES: Record<IcpScore["verdict"], string> = {
   cold: "bg-sky-500/15 text-sky-400 border-sky-500/40",
 };
 
+const SOURCE_LABELS: Record<IdentifyResult["source"], string> = {
+  unify: "UNIFY",
+  manual: "MANUAL",
+  mock: "MOCK",
+  "reverse-ip-fallback": "REVERSE-IP",
+  unresolved: "UNRESOLVED",
+};
+
+// UNIFY is the point of the project, not one option among five — it gets a
+// distinct, larger, glowing treatment. Everything else reads as quiet
+// metadata by comparison, on purpose.
+function SourceBadge({ source, size = "sm" }: { source: IdentifyResult["source"]; size?: "sm" | "lg" }) {
+  const label = SOURCE_LABELS[source];
+
+  if (source === "unify") {
+    return (
+      <span
+        className={
+          size === "lg"
+            ? "inline-flex items-center gap-1.5 rounded-full border border-sky-400/50 bg-sky-400/15 px-3 py-1 text-sm font-bold tracking-wide text-sky-300 shadow-[0_0_20px_-2px_rgba(56,189,248,0.6)]"
+            : "inline-flex items-center gap-1 rounded-full border border-sky-400/50 bg-sky-400/15 px-2 py-0.5 text-[10px] font-bold tracking-wide text-sky-300"
+        }
+      >
+        <span className={`rounded-full bg-sky-400 ${size === "lg" ? "h-1.5 w-1.5" : "h-1 w-1"}`} />
+        {label}
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className={
+        size === "lg"
+          ? "inline-flex items-center rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-0.5 text-xs font-medium tracking-wide text-white/40"
+          : "inline-flex items-center rounded-full border border-white/10 bg-white/[0.03] px-2 py-0.5 text-[10px] font-medium tracking-wide text-white/35"
+      }
+    >
+      {label}
+    </span>
+  );
+}
+
 export default function DashboardPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -233,15 +275,16 @@ export default function DashboardPage() {
             >
               <div className="flex items-center justify-between gap-2">
                 <span className="font-medium text-white/90 truncate">
-                  {session.company?.name ?? "Identifying…"}
+                  {session.company?.name ?? (session.identify ? "Not resolved" : "Identifying…")}
                 </span>
-                {session.score && (
-                  <span
-                    className={`text-xs px-2 py-0.5 rounded-full border shrink-0 ${VERDICT_STYLES[session.score.verdict]}`}
-                  >
-                    {session.score.verdict}
-                  </span>
-                )}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {session.identify && <SourceBadge source={session.identify.source} />}
+                  {session.score && (
+                    <span className={`text-xs px-2 py-0.5 rounded-full border ${VERDICT_STYLES[session.score.verdict]}`}>
+                      {session.score.verdict}
+                    </span>
+                  )}
+                </div>
               </div>
               <div className="text-xs text-white/40 mt-1">
                 {new Date(session.visit.ts).toLocaleTimeString()} · {session.visit.path}
@@ -314,13 +357,16 @@ function stepColor(status: StepStatus): string {
 }
 
 function ResultsPanel({ session }: { session: Session }) {
-  const { company, research, score, persona, outreach } = session;
+  const { company, identify, research, score, persona, outreach } = session;
 
   return (
     <div className="grid grid-cols-1 xl:grid-cols-[1fr_1fr_260px] gap-6 items-start">
       <div className="flex flex-col gap-6">
         <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
-          <h2 className="text-sm uppercase tracking-widest text-white/40 mb-3">Company</h2>
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <h2 className="text-sm uppercase tracking-widest text-white/40">Company</h2>
+            {identify && <SourceBadge source={identify.source} size="lg" />}
+          </div>
           {company ? (
             <>
               <div className="text-xl font-semibold text-white/90">{company.name}</div>
@@ -334,6 +380,13 @@ function ResultsPanel({ session }: { session: Session }) {
                 {company.hqCountry && <span>{company.hqCountry}</span>}
               </div>
             </>
+          ) : identify ? (
+            <div className="mt-1">
+              <p className="text-white/70 text-sm leading-relaxed">
+                Company not resolved — consumer or mobile IP. Expected on venue wifi; this is exactly what the
+                presenter override is for.
+              </p>
+            </div>
           ) : (
             <div className="text-white/30 text-sm">Resolving…</div>
           )}

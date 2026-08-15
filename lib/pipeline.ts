@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
-import companiesFixture from "@/fixtures/companies.json";
 import { getSession, emitStep, patchSession } from "./store";
 import { research } from "./research";
+import { identify } from "./identify";
 import type {
   Company,
   IcpScore,
@@ -9,27 +9,18 @@ import type {
   LiveEngagement,
   Outreach,
   Persona,
+  Research,
   SendWindowCalc,
   Session,
-  Signal,
   StepName,
   VisitEvent,
 } from "./types";
 
-// ORCHESTRATOR. Every step below still returns fixture data after a short
-// delay — later tasks replace each one with a real call (Unify, OpenAI,
-// etc.) behind the MOCK_* env flags described in AGENTS.md. withStep is the
-// safety net that makes that swap safe: a real call that errors or hangs
-// degrades to fixture data instead of taking the demo down.
-
-type FixtureCompany = Company & {
-  research: {
-    signals: Signal[];
-    techHints: string[];
-  };
-};
-
-const COMPANIES = companiesFixture as FixtureCompany[];
+// ORCHESTRATOR. identify() and research() are real (see lib/identify.ts,
+// lib/research.ts); score/persona/compose/engage/unify still return fixture
+// data after a short delay pending later tasks. withStep is the safety net
+// that makes each swap safe: a real call that errors or hangs degrades to
+// fixture data instead of taking the demo down.
 
 const STEP_DURATION_MS: Record<StepName, [number, number]> = {
   identify: [400, 700],
@@ -57,7 +48,6 @@ function timeoutRejection<T>(ms: number): Promise<T> {
   });
 }
 
-<<<<<<< HEAD
 // Emits start, measures duration, patches the session, emits done with the
 // payload. On error or timeout, emits status "error" with a short note and
 // resolves to `fallback` instead — the pipeline always keeps moving.
@@ -86,52 +76,6 @@ async function withStep<T>(
     emitStep({ visitId, step, status: "error", ms, payload: fallback, note });
     return fallback;
   }
-}
-
-function normalizeDomain(input: string): string {
-  return input
-    .trim()
-    .toLowerCase()
-    .replace(/^https?:\/\//, "")
-    .replace(/^www\./, "")
-    .replace(/\/.*$/, "");
-=======
-function mockScore(company: Company): IcpScore {
-  const score = company.employeeCount && company.employeeCount > 1000 ? 64 : 82;
-  return {
-    score,
-    reasons: [
-      "Employee count in target band",
-      `${company.industry ?? "Industry"} matches ICP vertical`,
-      "Recent funding/hiring signals budget availability",
-    ],
-    verdict: score >= 75 ? "hot" : score >= 50 ? "warm" : "cold",
-  };
->>>>>>> af9da8e (Unify integration)
-}
-
-function findFixtureByDomain(domain: string | undefined): FixtureCompany | undefined {
-  if (!domain) return undefined;
-  const target = normalizeDomain(domain);
-  return COMPANIES.find((c) => normalizeDomain(c.domain) === target);
-}
-
-function resolveFixtureCompany(visit: VisitEvent): FixtureCompany | undefined {
-  if (visit.manualDomain) {
-    return findFixtureByDomain(visit.manualDomain);
-  }
-  return COMPANIES[Math.floor(Math.random() * COMPANIES.length)];
-}
-
-function toCompany(fixture: FixtureCompany): Company {
-  return {
-    domain: fixture.domain,
-    name: fixture.name,
-    employeeCount: fixture.employeeCount,
-    industry: fixture.industry,
-    description: fixture.description,
-    hqCountry: fixture.hqCountry,
-  };
 }
 
 function getZonedParts(date: Date, timeZone: string) {
@@ -224,94 +168,15 @@ function calcSendWindow(now: Date): SendWindowCalc {
 
 async function identifyStep(
   visit: VisitEvent,
-  fixture: FixtureCompany | undefined,
   sendWindow: SendWindowCalc,
 ): Promise<{ identify: IdentifyResult; sendWindow: SendWindowCalc }> {
-  await wait(jitter(STEP_DURATION_MS.identify));
-
-<<<<<<< HEAD
-  let identify: IdentifyResult;
-  if (visit.manualDomain) {
-    identify = fixture
-      ? { company: toCompany(fixture), source: "manual", confidence: 1, reason: "Presenter-selected demo company" }
-      : {
-          company: undefined,
-          source: "unresolved",
-          confidence: 0,
-          reason: `No fixture company matches domain "${visit.manualDomain}"`,
-        };
-  } else {
-    identify = fixture
-      ? { company: toCompany(fixture), source: "mock", confidence: 0.91, reason: "Resolved via mock reverse-IP lookup fixture" }
-      : { company: undefined, source: "unresolved", confidence: 0, reason: "No fixture available" };
-=======
-  let persona: Persona | undefined;
-
-  for (const step of STEP_ORDER) {
-    emitStep({ visitId: visit.id, step, status: "start", ms: 0 });
-    const duration = jitter(STEP_DURATION_MS[step]);
-    await wait(duration);
-
-    let payload: unknown;
-    switch (step) {
-      case "identify": {
-        const identify = mockIdentify(company);
-        patchSession(visit.id, { identify, company });
-        payload = { identify, sendWindow };
-        break;
-      }
-      case "research": {
-        const researchResult = await research(company);
-        patchSession(visit.id, { research: researchResult });
-        payload = researchResult;
-        break;
-      }
-      case "score": {
-        const score = mockScore(company);
-        patchSession(visit.id, { score });
-        payload = score;
-        break;
-      }
-      case "persona": {
-        persona = mockPersona();
-        patchSession(visit.id, { persona });
-        payload = persona;
-        break;
-      }
-      case "compose": {
-        const outreach = mockOutreach(company, persona ?? mockPersona());
-        patchSession(visit.id, { outreach });
-        payload = outreach;
-        break;
-      }
-      case "engage": {
-        const engagement = mockEngagement(company);
-        const engagedAtMs = Date.now() - visit.ts;
-        patchSession(visit.id, { engagement, engagedAtMs });
-        payload = { engagement, engagedAtMs };
-        break;
-      }
-      case "unify": {
-        const unifyRef = `unify_ref_${randomUUID().slice(0, 8)}`;
-        const totalMs = Date.now() - visit.ts;
-        patchSession(visit.id, { unifyRef, totalMs });
-        payload = { unifyRef, totalMs };
-        break;
-      }
-    }
-
-    console.log(`[t60] visit=${visit.id} step=${step} status=done ms=${duration}`);
-    emitStep({ visitId: visit.id, step, status: "done", ms: duration, payload });
->>>>>>> af9da8e (Unify integration)
-  }
-
-  return { identify, sendWindow };
+  const result = await identify(visit);
+  return { identify: result, sendWindow };
 }
 
 async function researchStep(company: Company | undefined): Promise<Research> {
-  await wait(jitter(STEP_DURATION_MS.research));
-
   if (!company) {
+    await wait(jitter(STEP_DURATION_MS.research));
     return {
       summary: "No company match yet, so research is limited to what's on the page they're viewing.",
       signals: [],
@@ -321,24 +186,7 @@ async function researchStep(company: Company | undefined): Promise<Research> {
     };
   }
 
-  const fixture = findFixtureByDomain(company.domain);
-  if (!fixture) {
-    return {
-      summary: `${company.name} is a known account, but detailed signals aren't available in the fixture set.`,
-      signals: [],
-      techHints: [],
-      sources: [company.domain],
-      degraded: true,
-    };
-  }
-
-  return {
-    summary: `${company.name} is active in ${company.industry ?? "its category"} and shows signals worth acting on.`,
-    signals: fixture.research.signals,
-    techHints: fixture.research.techHints,
-    sources: [`${company.domain}/careers`, "public filings"],
-    degraded: false,
-  };
+  return research(company);
 }
 
 async function scoreStep(company: Company | undefined): Promise<IcpScore> {
@@ -457,12 +305,11 @@ async function runPipelineSteps(visitId: string): Promise<void> {
   const { visit } = session;
 
   const sendWindow = calcSendWindow(new Date(visit.ts));
-  const fixture = resolveFixtureCompany(visit);
 
   const identifyOutcome = await withStep<{ identify: IdentifyResult; sendWindow: SendWindowCalc }>(
     "identify",
     visitId,
-    () => identifyStep(visit, fixture, sendWindow),
+    () => identifyStep(visit, sendWindow),
     {
       identify: { company: undefined, source: "unresolved", confidence: 0, reason: "Identify step failed" },
       sendWindow,

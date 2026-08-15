@@ -1,4 +1,4 @@
-import type { Session, StepEvent, VisitEvent } from "./types";
+import type { Company, Session, StepEvent, VisitEvent } from "./types";
 
 // Backed by globalThis, not a plain module-level variable: `next dev`
 // recompiles routes on demand and can evict an inactive one, which would
@@ -7,10 +7,15 @@ import type { Session, StepEvent, VisitEvent } from "./types";
 declare global {
   var __t60Sessions: Map<string, Session> | undefined;
   var __t60Subscribers: Set<(event: StepEvent) => void> | undefined;
+  var __t60UnifyReveals: Map<string, { company: Company; visitId?: string; receivedAt: number }> | undefined;
 }
 
 const sessions = (globalThis.__t60Sessions ??= new Map<string, Session>());
 const subscribers = (globalThis.__t60Subscribers ??= new Set<(event: StepEvent) => void>());
+// Unify Play webhooks arrive out of band from the pipeline's synchronous
+// identify step, keyed by visitor IP so identify() can poll for a reveal
+// that lands just after the request that triggered it.
+const unifyReveals = (globalThis.__t60UnifyReveals ??= new Map());
 
 export function createSession(visit: VisitEvent): Session {
   const session: Session = { visit, steps: [] };
@@ -51,4 +56,27 @@ export function subscribe(cb: (event: StepEvent) => void): () => void {
   return () => {
     subscribers.delete(cb);
   };
+}
+
+// Most-recent session whose visit.ip matches, seen within the last `withinMs`.
+export function findSessionByIp(ip: string, withinMs: number): Session | undefined {
+  const now = Date.now();
+  let best: Session | undefined;
+  for (const session of sessions.values()) {
+    if (session.visit.ip === ip && now - session.visit.ts <= withinMs) {
+      if (!best || session.visit.ts > best.visit.ts) best = session;
+    }
+  }
+  return best;
+}
+
+export function recordUnifyReveal(ip: string, company: Company, visitId?: string): void {
+  unifyReveals.set(ip, { company, visitId, receivedAt: Date.now() });
+}
+
+export function peekUnifyReveal(ip: string, maxAgeMs: number): Company | undefined {
+  const entry = unifyReveals.get(ip);
+  if (!entry) return undefined;
+  if (Date.now() - entry.receivedAt > maxAgeMs) return undefined;
+  return entry.company;
 }

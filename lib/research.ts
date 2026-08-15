@@ -1,6 +1,19 @@
 import OpenAI from "openai";
 import { z } from "zod";
+import companiesFixture from "@/fixtures/companies.json";
 import type { Company, Research, Signal } from "./types";
+
+type FixtureCompanyRecord = Company & { research?: { signals: Signal[]; techHints: string[] } };
+const COMPANIES = companiesFixture as FixtureCompanyRecord[];
+
+function normalizeDomain(domain: string): string {
+  return domain
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/^www\./, "")
+    .replace(/\/.*$/, "");
+}
 
 const UNIFY_TIMEOUT_MS = 6_000;
 const OPENAI_TIMEOUT_MS = 12_000;
@@ -150,77 +163,14 @@ async function readUnifySignals(company: Company): Promise<SourceResult<Signal[]
   }
 }
 
+// Sourced from fixtures/companies.json rather than a second hardcoded copy,
+// so the demo's safety-net data can't drift out of sync with the fixture
+// set the rest of the app (identify, the demo control presets) uses.
 function fixtureResearch(company: Company, degraded = false): Research {
-  const knownFixture = {
-    "acme-robotics.io": {
-      summary:
-        "Acme Robotics builds autonomous warehouse-picking robots for third-party logistics providers. It sells automation that helps operations teams increase fulfilment throughput.",
-      signals: [
-        {
-          text: "Demo fixture: Acme Robotics announced a warehouse automation pilot for 3PL operators.",
-          date: "2026-06-12",
-          source: "https://acme-robotics.io/news",
-        },
-        {
-          text: "Demo fixture: Acme Robotics opened roles for deployment and field-operations engineers.",
-          date: "2026-05-28",
-          source: "https://acme-robotics.io/careers",
-        },
-        {
-          text: "Demo fixture: Acme Robotics expanded its support for high-volume fulfilment centres.",
-          date: "2026-04-16",
-          source: "https://acme-robotics.io/news",
-        },
-      ],
-      techHints: ["AWS", "Kubernetes", "Segment"],
-    },
-    "northstar-logistics.com": {
-      summary:
-        "Northstar Logistics is a freight brokerage expanding into third-party logistics warehousing. It sells transport and warehouse capacity to mid-market shippers.",
-      signals: [
-        {
-          text: "Demo fixture: Northstar Logistics announced an expansion of its 3PL warehouse network.",
-          date: "2026-06-03",
-          source: "https://northstar-logistics.com/news",
-        },
-        {
-          text: "Demo fixture: Northstar Logistics posted operations roles supporting warehouse growth.",
-          date: "2026-05-21",
-          source: "https://northstar-logistics.com/careers",
-        },
-        {
-          text: "Demo fixture: Northstar Logistics introduced a new freight visibility service for shippers.",
-          date: "2026-03-11",
-          source: "https://northstar-logistics.com/news",
-        },
-      ],
-      techHints: ["AWS", "Snowflake", "HubSpot"],
-    },
-    "brightfield.ai": {
-      summary:
-        "Brightfield provides computer vision for crop-yield forecasting. It sells predictive planning insights to agricultural operators and agribusinesses.",
-      signals: [
-        {
-          text: "Demo fixture: Brightfield released an updated crop-yield forecasting model for growers.",
-          date: "2026-06-08",
-          source: "https://brightfield.ai/news",
-        },
-        {
-          text: "Demo fixture: Brightfield added data-science and platform-engineering roles.",
-          date: "2026-05-09",
-          source: "https://brightfield.ai/careers",
-        },
-        {
-          text: "Demo fixture: Brightfield announced a new expansion with agribusiness partners.",
-          date: "2026-02-19",
-          source: "https://brightfield.ai/news",
-        },
-      ],
-      techHints: ["AWS", "Datadog", "Snowflake"],
-    },
-  }[company.domain];
+  const target = normalizeDomain(company.domain);
+  const match = COMPANIES.find((c) => normalizeDomain(c.domain) === target);
 
-  if (!knownFixture) {
+  if (!match?.research) {
     return {
       summary:
         company.description ?? `${company.name} operates at ${company.domain}. Research is temporarily unavailable.`,
@@ -231,11 +181,15 @@ function fixtureResearch(company: Company, degraded = false): Research {
     };
   }
 
+  const sources = match.research.signals
+    .map((signal) => signal.source)
+    .filter((source): source is string => Boolean(source));
+
   return {
-    summary: knownFixture.summary,
-    signals: knownFixture.signals.map((signal) => ({ ...signal, origin: "agent" as const })),
-    techHints: knownFixture.techHints,
-    sources: Array.from(new Set(knownFixture.signals.map((signal) => signal.source))),
+    summary: company.description ?? `${company.name} is active in ${company.industry ?? "its category"}.`,
+    signals: match.research.signals,
+    techHints: match.research.techHints,
+    sources: Array.from(new Set(sources)),
     degraded,
   };
 }
