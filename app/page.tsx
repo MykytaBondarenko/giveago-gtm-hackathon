@@ -12,6 +12,8 @@ import type {
   Session,
   StepEvent,
   StepName,
+  UnifyOperationResult,
+  UnifyPushResult,
 } from "@/lib/types";
 
 const STEP_ORDER: StepName[] = [
@@ -37,7 +39,7 @@ const STEP_LABELS: Record<StepName, string> = {
 type IdentifyPayload = { identify: IdentifyResult; sendWindow: SendWindowCalc };
 type ComposePayload = { outreach: Outreach; engagement: LiveEngagement };
 type EngagePayload = { engagement: LiveEngagement; engagedAtMs: number };
-type UnifyPayload = { unifyRef: string; totalMs: number };
+type UnifyPayload = { unifyPush: UnifyPushResult; totalMs: number };
 
 // Sessions arriving via SSE after the initial snapshot are known only through
 // their StepEvent stream, so we rebuild each session incrementally.
@@ -90,8 +92,8 @@ function applyStepEvent(sessions: Session[], event: StepEvent): Session[] {
         break;
       }
       case "unify": {
-        const { unifyRef, totalMs } = event.payload as UnifyPayload;
-        next.unifyRef = unifyRef;
+        const { unifyPush, totalMs } = event.payload as UnifyPayload;
+        next.unifyPush = unifyPush;
         next.totalMs = totalMs;
         break;
       }
@@ -360,213 +362,321 @@ function stepColor(status: StepStatus): string {
 }
 
 function ResultsPanel({ session }: { session: Session }) {
-  const { company, identify, research, score, persona, outreach, engagement, engagedAtMs } = session;
+  const { company, identify, research, score, persona, outreach, engagement, engagedAtMs, unifyPush, totalMs } = session;
   const engageInfo = getStepInfo(session, "engage");
 
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-[1fr_1fr_260px] gap-6 items-start">
-      <div className="flex flex-col gap-6">
-        <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
-          <div className="flex items-center justify-between gap-3 mb-3">
-            <h2 className="text-sm uppercase tracking-widest text-white/40">Company</h2>
-            {identify && <SourceBadge source={identify.source} size="lg" />}
-          </div>
-          {company ? (
-            <>
-              <div className="text-xl font-semibold text-white/90">{company.name}</div>
-              <div className="text-white/50 text-sm mt-1">{company.domain}</div>
-              {company.description && (
-                <p className="text-white/60 text-sm mt-3">{company.description}</p>
-              )}
-              <div className="flex flex-wrap gap-3 mt-4 text-xs text-white/40">
-                {company.industry && <span>{company.industry}</span>}
-                {company.employeeCount && <span>{company.employeeCount} employees</span>}
-                {company.hqCountry && <span>{company.hqCountry}</span>}
-              </div>
-            </>
-          ) : identify ? (
-            <div className="mt-1">
-              <p className="text-white/70 text-sm leading-relaxed">
-                Company not resolved — consumer or mobile IP. Expected on venue wifi; this is exactly what the
-                presenter override is for.
-              </p>
+    <div className="flex flex-col gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_1fr_260px] gap-6 items-start">
+        <div className="flex flex-col gap-6">
+          <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <h2 className="text-sm uppercase tracking-widest text-white/40">Company</h2>
+              {identify && <SourceBadge source={identify.source} size="lg" />}
             </div>
-          ) : (
-            <div className="text-white/30 text-sm">Resolving…</div>
-          )}
+            {company ? (
+              <>
+                <div className="text-xl font-semibold text-white/90">{company.name}</div>
+                <div className="text-white/50 text-sm mt-1">{company.domain}</div>
+                {company.description && (
+                  <p className="text-white/60 text-sm mt-3">{company.description}</p>
+                )}
+                <div className="flex flex-wrap gap-3 mt-4 text-xs text-white/40">
+                  {company.industry && <span>{company.industry}</span>}
+                  {company.employeeCount && <span>{company.employeeCount} employees</span>}
+                  {company.hqCountry && <span>{company.hqCountry}</span>}
+                </div>
+              </>
+            ) : identify ? (
+              <div className="mt-1">
+                <p className="text-white/70 text-sm leading-relaxed">
+                  Company not resolved — consumer or mobile IP. Expected on venue wifi; this is exactly what the
+                  presenter override is for.
+                </p>
+              </div>
+            ) : (
+              <div className="text-white/30 text-sm">Resolving…</div>
+            )}
+          </div>
+  
+          <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm uppercase tracking-widest text-white/40">ICP score</h2>
+              {score && (
+                <span className={`text-xs px-2 py-0.5 rounded-full border ${VERDICT_STYLES[score.verdict]}`}>
+                  {score.verdict}
+                </span>
+              )}
+            </div>
+            {score ? (
+              <>
+                <div className="text-4xl font-bold text-white/90 tabular-nums">{score.score}</div>
+                <ul className="mt-3 space-y-1 text-sm text-white/60 list-disc list-inside">
+                  {score.reasons.map((reason) => (
+                    <li key={reason}>{reason}</li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              <div className="text-white/30 text-sm">Scoring…</div>
+            )}
+          </div>
+  
+          <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
+            <h2 className="text-sm uppercase tracking-widest text-white/40 mb-3">Persona</h2>
+            {persona ? (
+              <>
+                <div className="text-lg font-semibold text-white/90">{persona.title}</div>
+                <div className="text-white/50 text-sm">{persona.department}</div>
+                <p className="text-white/60 text-sm mt-2">{persona.whyThisPerson}</p>
+              </>
+            ) : (
+              <div className="text-white/30 text-sm">Selecting…</div>
+            )}
+          </div>
+  
+          <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
+            <div className="flex items-center gap-2 mb-3">
+              <h2 className="text-sm uppercase tracking-widest text-white/40">Signals</h2>
+              {research?.degraded && (
+                <span
+                  aria-label="Research is degraded"
+                  title="One or more research sources were unavailable; fallback data may be shown."
+                  className="h-2 w-2 rounded-full bg-amber-400"
+                />
+              )}
+            </div>
+            {research ? (
+              research.signals.length > 0 ? (
+                <ul className="space-y-3">
+                  {research.signals.map((signal, index) => (
+                    <li key={`${signal.origin}-${signal.text}-${index}`} className="text-sm text-white/65">
+                      <div className="flex items-start gap-2">
+                        <span
+                          className={`mt-0.5 rounded border px-1.5 py-0.5 text-[10px] font-semibold tracking-wide ${
+                            signal.origin === "unify"
+                              ? "border-sky-400/40 bg-sky-400/10 text-sky-300"
+                              : "border-violet-400/40 bg-violet-400/10 text-violet-300"
+                          }`}
+                        >
+                          {signal.origin === "unify" ? "UNIFY" : "AGENT"}
+                        </span>
+                        <span>{signal.text}</span>
+                      </div>
+                      {(signal.date || signal.source) && (
+                        <div className="ml-16 mt-1 text-xs text-white/35">
+                          {[signal.date, signal.source].filter(Boolean).join(" · ")}
+                        </div>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="text-white/30 text-sm">No signals returned yet.</div>
+              )
+            ) : (
+              <div className="text-white/30 text-sm">Researching…</div>
+            )}
+          </div>
         </div>
-
-        <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm uppercase tracking-widest text-white/40">ICP score</h2>
-            {score && (
-              <span className={`text-xs px-2 py-0.5 rounded-full border ${VERDICT_STYLES[score.verdict]}`}>
-                {score.verdict}
+  
+        <div className="rounded-2xl border border-white/10 bg-white/[0.02] overflow-hidden flex flex-col">
+          <div className="bg-white/[0.04] px-5 py-3 border-b border-white/10 flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-red-400/60" />
+            <span className="w-2.5 h-2.5 rounded-full bg-amber-400/60" />
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400/60" />
+            <span className="ml-2 text-xs text-white/40">Draft — dry-run</span>
+            {outreach?.guardrailsPassed && (
+              <span className="ml-auto flex items-center gap-1 text-xs font-medium text-emerald-400">
+                <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5">
+                  <path
+                    fillRule="evenodd"
+                    d="M16.7 5.3a1 1 0 0 1 0 1.4l-7.5 7.5a1 1 0 0 1-1.4 0l-3.5-3.5a1 1 0 1 1 1.4-1.4l2.8 2.8 6.8-6.8a1 1 0 0 1 1.4 0Z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+                guardrails passed
               </span>
             )}
           </div>
-          {score ? (
+          {outreach ? (
             <>
-              <div className="text-4xl font-bold text-white/90 tabular-nums">{score.score}</div>
-              <ul className="mt-3 space-y-1 text-sm text-white/60 list-disc list-inside">
-                {score.reasons.map((reason) => (
-                  <li key={reason}>{reason}</li>
-                ))}
-              </ul>
+              <div className="p-5 flex flex-col gap-3">
+                <div className="flex items-baseline gap-2 text-sm">
+                  <span className="text-white/40 w-14 shrink-0">To</span>
+                  <span className="text-white/70">{persona?.title ?? "Target persona"}</span>
+                </div>
+                <div className="flex items-baseline gap-2 text-sm">
+                  <span className="text-white/40 w-14 shrink-0">Subject</span>
+                  <span className="text-white/90 font-medium">{outreach.subject}</span>
+                </div>
+                <div className="border-t border-white/10 pt-3 mt-1">
+                  <pre className="whitespace-pre-wrap font-sans text-white/80 text-base leading-relaxed">
+                    {outreach.body}
+                  </pre>
+                </div>
+              </div>
+              <div className="mt-auto border-t border-white/10 p-5">
+                <div className="text-xs uppercase tracking-widest text-white/40 mb-2">Rep brief</div>
+                <ul className="space-y-1 text-sm text-white/60 list-disc list-inside">
+                  {outreach.repBrief.map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
+              </div>
             </>
           ) : (
-            <div className="text-white/30 text-sm">Scoring…</div>
+            <div className="p-5 text-white/30 text-sm">Drafting…</div>
           )}
         </div>
-
-        <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
-          <h2 className="text-sm uppercase tracking-widest text-white/40 mb-3">Persona</h2>
-          {persona ? (
-            <>
-              <div className="text-lg font-semibold text-white/90">{persona.title}</div>
-              <div className="text-white/50 text-sm">{persona.department}</div>
-              <p className="text-white/60 text-sm mt-2">{persona.whyThisPerson}</p>
-            </>
-          ) : (
-            <div className="text-white/30 text-sm">Selecting…</div>
+  
+        <div className="flex flex-col items-center gap-4">
+          {engagedAtMs !== undefined && (
+            <div className="text-center">
+              <div className="font-mono font-bold text-emerald-400 tabular-nums leading-none" style={{ fontSize: "clamp(1.75rem, 3vw, 2.5rem)" }}>
+                {engagedAtMs}
+                <span className="text-lg text-emerald-400/60">ms</span>
+              </div>
+              <div className="text-[11px] uppercase tracking-widest text-white/40 mt-1">visit → banner</div>
+            </div>
           )}
-        </div>
-
-        <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
-          <div className="flex items-center gap-2 mb-3">
-            <h2 className="text-sm uppercase tracking-widest text-white/40">Signals</h2>
-            {research?.degraded && (
-              <span
-                aria-label="Research is degraded"
-                title="One or more research sources were unavailable; fallback data may be shown."
-                className="h-2 w-2 rounded-full bg-amber-400"
-              />
-            )}
-          </div>
-          {research ? (
-            research.signals.length > 0 ? (
-              <ul className="space-y-3">
-                {research.signals.map((signal, index) => (
-                  <li key={`${signal.origin}-${signal.text}-${index}`} className="text-sm text-white/65">
-                    <div className="flex items-start gap-2">
-                      <span
-                        className={`mt-0.5 rounded border px-1.5 py-0.5 text-[10px] font-semibold tracking-wide ${
-                          signal.origin === "unify"
-                            ? "border-sky-400/40 bg-sky-400/10 text-sky-300"
-                            : "border-violet-400/40 bg-violet-400/10 text-violet-300"
-                        }`}
-                      >
-                        {signal.origin === "unify" ? "UNIFY" : "AGENT"}
-                      </span>
-                      <span>{signal.text}</span>
+  
+          <div className="rounded-[2.5rem] border-4 border-white/15 bg-white/[0.02] p-3 h-[420px] w-full flex flex-col">
+            <div className="mx-auto w-16 h-1 rounded-full bg-white/15 mb-3 shrink-0" />
+            <div className="relative flex-1 rounded-[1.75rem] border border-white/10 overflow-hidden">
+              {!engagement && (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <span className="text-white/20 text-xs text-center px-6">
+                    {engageInfo.status === "skipped"
+                      ? "No engagement — below ICP threshold."
+                      : "Waiting for engagement…"}
+                  </span>
+                </div>
+              )}
+              {engagement && (
+                <div className="absolute inset-x-2 bottom-2 rounded-xl border border-white/10 bg-slate-900/95 p-3 shadow-lg shadow-black/40">
+                  <div className="flex items-start gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-semibold text-white">{engagement.headline}</p>
+                      <p className="mt-0.5 text-[11px] text-white/50">{engagement.line}</p>
                     </div>
-                    {(signal.date || signal.source) && (
-                      <div className="ml-16 mt-1 text-xs text-white/35">
-                        {[signal.date, signal.source].filter(Boolean).join(" · ")}
-                      </div>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <div className="text-white/30 text-sm">No signals returned yet.</div>
-            )
-          ) : (
-            <div className="text-white/30 text-sm">Researching…</div>
-          )}
+                    <span className="shrink-0 text-white/30 text-xs leading-none">&times;</span>
+                  </div>
+                  <div className="mt-2 w-full rounded-md bg-blue-500 px-2 py-1.5 text-center text-[11px] font-semibold text-white">
+                    {engagement.cta}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
-      <div className="rounded-2xl border border-white/10 bg-white/[0.02] overflow-hidden flex flex-col">
-        <div className="bg-white/[0.04] px-5 py-3 border-b border-white/10 flex items-center gap-2">
-          <span className="w-2.5 h-2.5 rounded-full bg-red-400/60" />
-          <span className="w-2.5 h-2.5 rounded-full bg-amber-400/60" />
-          <span className="w-2.5 h-2.5 rounded-full bg-emerald-400/60" />
-          <span className="ml-2 text-xs text-white/40">Draft — dry-run</span>
-          {outreach?.guardrailsPassed && (
-            <span className="ml-auto flex items-center gap-1 text-xs font-medium text-emerald-400">
-              <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5">
-                <path
-                  fillRule="evenodd"
-                  d="M16.7 5.3a1 1 0 0 1 0 1.4l-7.5 7.5a1 1 0 0 1-1.4 0l-3.5-3.5a1 1 0 1 1 1.4-1.4l2.8 2.8 6.8-6.8a1 1 0 0 1 1.4 0Z"
-                  clipRule="evenodd"
-                />
-              </svg>
-              guardrails passed
+      <UnifySection unifyPush={unifyPush} totalMs={totalMs} />
+    </div>
+  );
+}
+
+const UNIFY_STATUS_STYLES: Record<UnifyOperationResult["status"], string> = {
+  sent: "bg-emerald-500/15 text-emerald-400 border-emerald-500/40",
+  "dry-run": "bg-amber-500/15 text-amber-400 border-amber-500/40",
+  simulated: "bg-white/10 text-white/50 border-white/15",
+  error: "bg-red-500/15 text-red-400 border-red-500/40",
+};
+
+const UNIFY_MODE_LABELS: Record<UnifyPushResult["mode"], string> = {
+  mock: "MOCK",
+  "dry-run": "DRY-RUN",
+  live: "LIVE",
+};
+
+function extractId(op?: UnifyOperationResult): string | undefined {
+  const response = op?.response as { data?: { id?: string }; id?: string } | undefined;
+  return response?.data?.id ?? response?.id;
+}
+
+function UnifyOperationRow({ label, op }: { label: string; op?: UnifyOperationResult }) {
+  if (!op) return null;
+  const id = extractId(op);
+  return (
+    <div className="flex items-center justify-between gap-3 py-2 border-b border-white/5 last:border-0">
+      <span className="text-sm text-white/70">{label}</span>
+      <div className="flex items-center gap-2">
+        {id && <span className="text-xs text-white/40 font-mono">{id.slice(0, 8)}</span>}
+        <span
+          className={`text-[10px] px-2 py-0.5 rounded-full border uppercase tracking-wide ${UNIFY_STATUS_STYLES[op.status]}`}
+        >
+          {op.status}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function UnifyPayloadBlock({ label, op }: { label: string; op?: UnifyOperationResult }) {
+  if (!op) return null;
+  return (
+    <div>
+      <div className="text-[11px] uppercase tracking-widest text-white/30 mb-1">{label}</div>
+      <pre className="rounded-lg border border-white/10 bg-black/30 p-3 text-xs text-white/60 overflow-x-auto">
+        {JSON.stringify(op.payload, null, 2)}
+      </pre>
+      {op.error && <p className="mt-1 text-xs text-red-400">{op.error}</p>}
+    </div>
+  );
+}
+
+// The "shipped" state: whatever ids came back, and — since this is dry-run
+// by default — the exact payload we would have sent, verbatim, so the
+// audience can see it rather than take our word for it.
+function UnifySection({ unifyPush, totalMs }: { unifyPush?: UnifyPushResult; totalMs?: number }) {
+  if (!unifyPush) {
+    return (
+      <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
+        <h2 className="text-sm uppercase tracking-widest text-white/40 mb-3">Unify write-back</h2>
+        <div className="text-white/30 text-sm">Shipping…</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-sm uppercase tracking-widest text-white/40">Unify write-back</h2>
+        <div className="flex items-center gap-3">
+          {totalMs !== undefined && (
+            <span className="text-xs text-white/40">
+              shipped in <span className="text-white/70 font-mono">{totalMs}ms</span>
             </span>
           )}
-        </div>
-        {outreach ? (
-          <>
-            <div className="p-5 flex flex-col gap-3">
-              <div className="flex items-baseline gap-2 text-sm">
-                <span className="text-white/40 w-14 shrink-0">To</span>
-                <span className="text-white/70">{persona?.title ?? "Target persona"}</span>
-              </div>
-              <div className="flex items-baseline gap-2 text-sm">
-                <span className="text-white/40 w-14 shrink-0">Subject</span>
-                <span className="text-white/90 font-medium">{outreach.subject}</span>
-              </div>
-              <div className="border-t border-white/10 pt-3 mt-1">
-                <pre className="whitespace-pre-wrap font-sans text-white/80 text-base leading-relaxed">
-                  {outreach.body}
-                </pre>
-              </div>
-            </div>
-            <div className="mt-auto border-t border-white/10 p-5">
-              <div className="text-xs uppercase tracking-widest text-white/40 mb-2">Rep brief</div>
-              <ul className="space-y-1 text-sm text-white/60 list-disc list-inside">
-                {outreach.repBrief.map((line) => (
-                  <li key={line}>{line}</li>
-                ))}
-              </ul>
-            </div>
-          </>
-        ) : (
-          <div className="p-5 text-white/30 text-sm">Drafting…</div>
-        )}
-      </div>
-
-      <div className="flex flex-col items-center gap-4">
-        {engagedAtMs !== undefined && (
-          <div className="text-center">
-            <div className="font-mono font-bold text-emerald-400 tabular-nums leading-none" style={{ fontSize: "clamp(1.75rem, 3vw, 2.5rem)" }}>
-              {engagedAtMs}
-              <span className="text-lg text-emerald-400/60">ms</span>
-            </div>
-            <div className="text-[11px] uppercase tracking-widest text-white/40 mt-1">visit → banner</div>
-          </div>
-        )}
-
-        <div className="rounded-[2.5rem] border-4 border-white/15 bg-white/[0.02] p-3 h-[420px] w-full flex flex-col">
-          <div className="mx-auto w-16 h-1 rounded-full bg-white/15 mb-3 shrink-0" />
-          <div className="relative flex-1 rounded-[1.75rem] border border-white/10 overflow-hidden">
-            {!engagement && (
-              <div className="absolute inset-0 flex items-center justify-center">
-                <span className="text-white/20 text-xs text-center px-6">
-                  {engageInfo.status === "skipped"
-                    ? "No engagement — below ICP threshold."
-                    : "Waiting for engagement…"}
-                </span>
-              </div>
-            )}
-            {engagement && (
-              <div className="absolute inset-x-2 bottom-2 rounded-xl border border-white/10 bg-slate-900/95 p-3 shadow-lg shadow-black/40">
-                <div className="flex items-start gap-2">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs font-semibold text-white">{engagement.headline}</p>
-                    <p className="mt-0.5 text-[11px] text-white/50">{engagement.line}</p>
-                  </div>
-                  <span className="shrink-0 text-white/30 text-xs leading-none">&times;</span>
-                </div>
-                <div className="mt-2 w-full rounded-md bg-blue-500 px-2 py-1.5 text-center text-[11px] font-semibold text-white">
-                  {engagement.cta}
-                </div>
-              </div>
-            )}
-          </div>
+          <span className="text-[10px] px-2 py-0.5 rounded-full border border-white/15 bg-white/5 text-white/50 uppercase tracking-wide">
+            {UNIFY_MODE_LABELS[unifyPush.mode]}
+          </span>
         </div>
       </div>
+
+      {unifyPush.skipped ? (
+        <p className="text-white/30 text-sm mt-3">{unifyPush.reason}</p>
+      ) : (
+        <>
+          <div className="mt-3">
+            <UnifyOperationRow label="Company record" op={unifyPush.company} />
+            <UnifyOperationRow label="Rep task" op={unifyPush.task} />
+            <UnifyOperationRow label="Sequence enrollment" op={unifyPush.sequence} />
+          </div>
+
+          <details className="mt-4">
+            <summary className="cursor-pointer text-xs text-white/40 hover:text-white/60 select-none">
+              View payloads sent to Unify
+            </summary>
+            <div className="mt-3 space-y-3">
+              <UnifyPayloadBlock label="Company record" op={unifyPush.company} />
+              <UnifyPayloadBlock label="Rep task" op={unifyPush.task} />
+              <UnifyPayloadBlock label="Sequence enrollment" op={unifyPush.sequence} />
+            </div>
+          </details>
+        </>
+      )}
     </div>
   );
 }

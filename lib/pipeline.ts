@@ -1,10 +1,11 @@
-import { randomUUID } from "crypto";
 import { getSession, emitStep, patchSession } from "./store";
 import { research } from "./research";
 import { identify } from "./identify";
 import { scoreIcp } from "./score";
 import { choosePersona } from "./people";
 import { compose } from "./compose";
+import { computeSendWindow } from "./sendWindow";
+import { pushToUnify } from "./unify";
 import type {
   Company,
   IcpScore,
@@ -16,15 +17,18 @@ import type {
   SendWindowCalc,
   Session,
   StepName,
+  UnifyPushResult,
   VisitEvent,
 } from "./types";
 
-// ORCHESTRATOR. identify(), research(), scoreIcp(), and choosePersona() are
-// real (see lib/identify.ts, lib/research.ts, lib/score.ts, lib/people.ts);
-// compose/engage/unify still return fixture data after a short delay
-// pending later tasks. withStep is the safety net that makes each swap
-// safe: a real call that errors or hangs degrades to fixture data instead
-// of taking the demo down.
+// ORCHESTRATOR. identify(), research(), scoreIcp(), choosePersona(),
+// compose(), computeSendWindow(), and pushToUnify() are all real now (see
+// lib/identify.ts, lib/research.ts, lib/score.ts, lib/people.ts,
+// lib/compose.ts, lib/sendWindow.ts, lib/unify.ts) — only engage's on-site
+// copy comes from compose() but its "put it live" act is a fixture step
+// with a short simulated delay. withStep is the safety net that makes each
+// swap safe: a real call that errors or hangs degrades to fixture data
+// instead of taking the demo down.
 
 const STEP_DURATION_MS: Record<StepName, [number, number]> = {
   identify: [400, 700],
@@ -36,7 +40,10 @@ const STEP_DURATION_MS: Record<StepName, [number, number]> = {
   unify: [400, 700],
 };
 
-const STEP_TIMEOUT_MS = 8000;
+// Must exceed every step's own internal budget (research.ts's OPENAI_TIMEOUT_MS
+// is the longest at 12s, including its one retry) — otherwise this outer race
+// kills a real call before its own retry/fallback logic ever gets to run.
+const STEP_TIMEOUT_MS = 15_000;
 
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -80,92 +87,6 @@ async function withStep<T>(
     emitStep({ visitId, step, status: "error", ms, payload: fallback, note });
     return fallback;
   }
-}
-
-function getZonedParts(date: Date, timeZone: string) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  }).formatToParts(date);
-  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
-  return {
-    year: get("year"),
-    month: get("month"),
-    day: get("day"),
-    hour: get("hour") % 24,
-    minute: get("minute"),
-    second: get("second"),
-  };
-}
-
-function zonedWallTimeToUtc(
-  year: number,
-  month: number,
-  day: number,
-  hour: number,
-  minute: number,
-  second: number,
-  timeZone: string,
-): Date {
-  const asUtc = Date.UTC(year, month - 1, day, hour, minute, second);
-  const zoned = getZonedParts(new Date(asUtc), timeZone);
-  const zonedAsUtc = Date.UTC(zoned.year, zoned.month - 1, zoned.day, zoned.hour, zoned.minute, zoned.second);
-  const diff = asUtc - zonedAsUtc;
-  return new Date(asUtc + diff);
-}
-
-const SEND_WINDOW_TZ = "America/Los_Angeles";
-const SEND_WINDOW_START_HOUR = 9;
-const SEND_WINDOW_END_HOUR = 16;
-
-function calcSendWindow(now: Date): SendWindowCalc {
-  const staggerMs = jitter([2 * 60_000, 6 * 60_000]);
-  const parts = getZonedParts(now, SEND_WINDOW_TZ);
-
-  let target: Date;
-  if (parts.hour >= SEND_WINDOW_START_HOUR && parts.hour < SEND_WINDOW_END_HOUR) {
-    target = new Date(now.getTime() + staggerMs);
-    const targetParts = getZonedParts(target, SEND_WINDOW_TZ);
-    if (targetParts.hour >= SEND_WINDOW_END_HOUR) {
-      target = zonedWallTimeToUtc(
-        parts.year,
-        parts.month,
-        parts.day + 1,
-        SEND_WINDOW_START_HOUR,
-        0,
-        0,
-        SEND_WINDOW_TZ,
-      );
-      target = new Date(target.getTime() + staggerMs);
-    }
-  } else if (parts.hour < SEND_WINDOW_START_HOUR) {
-    target = zonedWallTimeToUtc(parts.year, parts.month, parts.day, SEND_WINDOW_START_HOUR, 0, 0, SEND_WINDOW_TZ);
-    target = new Date(target.getTime() + staggerMs);
-  } else {
-    target = zonedWallTimeToUtc(
-      parts.year,
-      parts.month,
-      parts.day + 1,
-      SEND_WINDOW_START_HOUR,
-      0,
-      0,
-      SEND_WINDOW_TZ,
-    );
-    target = new Date(target.getTime() + staggerMs);
-  }
-
-  return {
-    nextAllowedSendUtc: target.toISOString(),
-    delayMs: target.getTime() - now.getTime(),
-    explanation:
-      "Standard outbound is throttled to 9:00-16:00 America/Los_Angeles, staggered ~2-6 min apart, queued until the mailbox has capacity.",
-  };
 }
 
 // --- step fixtures ---------------------------------------------------------
@@ -264,9 +185,15 @@ async function engageStep(
   return { engagement: shown, engagedAtMs: Date.now() - visit.ts };
 }
 
-async function unifyStep(visit: VisitEvent): Promise<{ unifyRef: string; totalMs: number }> {
-  await wait(jitter(STEP_DURATION_MS.unify));
-  return { unifyRef: `unify_ref_${randomUUID().slice(0, 8)}`, totalMs: Date.now() - visit.ts };
+// Re-reads the session so this sees every field patched by every earlier
+// step (research, score, persona, outreach, engagement) without threading
+// each one through as its own parameter.
+async function unifyStep(visitId: string, visit: VisitEvent): Promise<{ unifyPush: UnifyPushResult; totalMs: number }> {
+  const session = getSession(visitId);
+  const unifyPush = session
+    ? await pushToUnify(session)
+    : ({ mode: "mock", skipped: true, reason: "Session not found" } satisfies UnifyPushResult);
+  return { unifyPush, totalMs: Date.now() - visit.ts };
 }
 
 // --- orchestration -----------------------------------------------------
@@ -279,7 +206,7 @@ async function runPipelineSteps(visitId: string): Promise<void> {
   }
   const { visit } = session;
 
-  const sendWindow = calcSendWindow(new Date(visit.ts));
+  const sendWindow = computeSendWindow(new Date(visit.ts));
 
   const identifyOutcome = await withStep<{ identify: IdentifyResult; sendWindow: SendWindowCalc }>(
     "identify",
@@ -363,12 +290,15 @@ async function runPipelineSteps(visitId: string): Promise<void> {
     );
   }
 
-  await withStep<{ unifyRef: string; totalMs: number }>(
+  await withStep<{ unifyPush: UnifyPushResult; totalMs: number }>(
     "unify",
     visitId,
-    () => unifyStep(visit),
-    { unifyRef: "unify_ref_fallback", totalMs: Date.now() - visit.ts },
-    (value) => ({ unifyRef: value.unifyRef, totalMs: value.totalMs }),
+    () => unifyStep(visitId, visit),
+    {
+      unifyPush: { mode: "mock", skipped: true, reason: "Unify step failed" },
+      totalMs: Date.now() - visit.ts,
+    },
+    (value) => ({ unifyPush: value.unifyPush, totalMs: value.totalMs }),
   );
 }
 

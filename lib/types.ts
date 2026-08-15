@@ -74,6 +74,22 @@ export interface IdentifyResult {
   reason?: string;
 }
 
+export interface UnifyOperationResult {
+  payload: Record<string, unknown>;
+  status: "simulated" | "dry-run" | "sent" | "error";
+  response?: unknown;
+  error?: string;
+}
+
+export interface UnifyPushResult {
+  mode: "mock" | "dry-run" | "live";
+  skipped?: boolean;
+  reason?: string;
+  company?: UnifyOperationResult;
+  task?: UnifyOperationResult;
+  sequence?: UnifyOperationResult;
+}
+
 export type StepName =
   | "identify"
   | "research"
@@ -102,7 +118,7 @@ export interface Session {
   outreach?: Outreach;
   engagement?: LiveEngagement;
   sendWindow?: SendWindowCalc;
-  unifyRef?: string;
+  unifyPush?: UnifyPushResult;
   steps: StepEvent[];
   totalMs?: number;
   engagedAtMs?: number;
